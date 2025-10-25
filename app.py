@@ -934,68 +934,112 @@ if not st.session_state.pseudo:
         "Saisissez un pseudo dans la barre latérale puis cliquez 'Charger cet utilisateur'."
     )
 elif page == "Ledger":
+    # En-tête moderne pour la page Ledger
+    st.markdown("""
+        <div style="background: linear-gradient(90deg, #11998e 0%, #38ef7d 100%); 
+                    padding: 1.5rem; border-radius: 10px; margin-bottom: 2rem;">
+            <h1 style="color: white; margin: 0; text-align: center;">
+                💰 Gestion du Ledger
+            </h1>
+            <p style="color: #E8F5F2; margin: 0.5rem 0 0 0; text-align: center; font-size: 1.1rem;">
+                Vue d'ensemble de vos comptes et opérations financières
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+    
     col_left, col_right = st.columns([2, 1])
 
     with col_left:
-        st.subheader("Comptes et soldes")
+        # Section des comptes avec design amélioré
+        st.markdown("#### 🏦 Vos Comptes")
         balances_by_type = compute_balances_by_type()
 
-        # Préparer les données pour l'affichage
-        rows_acc = []
+        # Calculer les totaux d'abord
+        linked_total = sum(balances_by_type["linked"].values()) / 100
+        unlinked_total = sum(balances_by_type["unlinked"].values()) / 100
+        grand_total = linked_total + unlinked_total
+
+        # Affichage des totaux en cartes colorées
+        col_t1, col_t2, col_t3 = st.columns(3)
+        
+        with col_t1:
+            st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                           padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                    <h4 style="margin: 0; font-size: 0.9rem;">🔗 LINKED</h4>
+                    <h2 style="margin: 0.5rem 0; font-size: 1.5rem;">{linked_total:,.2f} €</h2>
+                </div>
+            """, unsafe_allow_html=True)
+            
+        with col_t2:
+            st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                           padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                    <h4 style="margin: 0; font-size: 0.9rem;">📎 UNLINKED</h4>
+                    <h2 style="margin: 0.5rem 0; font-size: 1.5rem;">{unlinked_total:,.2f} €</h2>
+                </div>
+            """, unsafe_allow_html=True)
+            
+        with col_t3:
+            st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+                           padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                    <h4 style="margin: 0; font-size: 0.9rem;">💰 TOTAL</h4>
+                    <h2 style="margin: 0.5rem 0; font-size: 1.5rem;">{grand_total:,.2f} €</h2>
+                </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        
+        # Liste détaillée des comptes avec style amélioré
+        st.markdown("##### 📋 Détail des comptes")
+        
         for acc in st.session_state.accounts:
-            status_icon = "🔗" if not acc.get("is_unlinked", False) else "📎"
-            status_text = "Linked" if not acc.get("is_unlinked", False) else "Unlinked"
             balance_eur = (
                 balances_by_type[
                     "linked" if not acc.get("is_unlinked", False) else "unlinked"
                 ].get(acc["account_id"], 0)
                 / 100
             )
+            
+            # Déterminer la couleur selon le type et le solde
+            if acc.get("is_unlinked", False):
+                bg_color = "#fff5f5" if balance_eur >= 0 else "#ffe5e5"
+                border_color = "#f093fb"
+                icon = "📎"
+                type_label = "Unlinked"
+            else:
+                bg_color = "#f0f8ff" if balance_eur >= 0 else "#ffe5e5"
+                border_color = "#667eea" 
+                icon = "🔗"
+                type_label = "Linked"
+            
+            # Format du montant avec couleur
+            amount_color = "#28a745" if balance_eur >= 0 else "#dc3545"
+            
+            st.markdown(f"""
+                <div style="background: {bg_color}; 
+                           border-left: 4px solid {border_color}; 
+                           padding: 1rem; margin: 0.5rem 0; 
+                           border-radius: 0 8px 8px 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h4 style="margin: 0; color: #333;">{icon} {acc['name']}</h4>
+                            <small style="color: #666;">Type: {type_label}</small>
+                        </div>
+                        <div style="text-align: right;">
+                            <h3 style="margin: 0; color: {amount_color}; font-weight: bold;">
+                                {balance_eur:,.2f} €
+                            </h3>
+                        </div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
 
-            rows_acc.append(
-                {
-                    "Nom": f"{status_icon} {acc['name']}",
-                    "Type": status_text,
-                    "Solde (€)": f"{balance_eur:.2f}",
-                }
-            )
-
-        # Calculer les totaux
-        linked_total = sum(balances_by_type["linked"].values()) / 100
-        unlinked_total = sum(balances_by_type["unlinked"].values()) / 100
-        grand_total = linked_total + unlinked_total
-
-        # Ajouter les lignes de totaux
-        rows_acc.append(
-            {"Nom": "━━━━━━━━━━━━━━", "Type": "━━━━━━━", "Solde (€)": "━━━━━━━━"}
-        )
-        rows_acc.append(
-            {
-                "Nom": "🔗 Total Linked",
-                "Type": "Subtotal",
-                "Solde (€)": f"{linked_total:.2f}",
-            }
-        )
-        rows_acc.append(
-            {
-                "Nom": "📎 Total Unlinked",
-                "Type": "Subtotal",
-                "Solde (€)": f"{unlinked_total:.2f}",
-            }
-        )
-        rows_acc.append(
-            {
-                "Nom": "💰 TOTAL GÉNÉRAL",
-                "Type": "Total",
-                "Solde (€)": f"{grand_total:.2f}",
-            }
-        )
-
-        df_acc = pd.DataFrame(rows_acc)
-        st.dataframe(df_acc, width="stretch", hide_index=True)
-
-        # Bouton pour supprimer la dernière opération du ledger
+        # Section de suppression avec style amélioré
         if st.session_state.ledger:
+            st.markdown("---")
+            
             last = st.session_state.ledger[-1]
             try:
                 acc_id_to_name = {
@@ -1006,32 +1050,62 @@ elif page == "Ledger":
                 src = acc_id_to_name.get(last.get("src_account_id", ""), "")
                 dest = acc_id_to_name.get(last.get("dest_account_id", ""), "")
                 accn = acc_id_to_name.get(last.get("account_id", ""), "")
-                meta = " | ".join(
-                    p
-                    for p in [
-                        t,
-                        f"{amt:.2f}€",
-                        f"depuis {src}" if src else "",
-                        f"vers {dest}" if dest else "",
-                        f"compte {accn}" if accn else "",
-                    ]
-                    if p
-                )
-                st.caption(f"Dernière: {last.get('ts','')} · {meta}")
+                
+                # Formatage des détails de la dernière opération
+                details = []
+                if src:
+                    details.append(f"depuis {src}")
+                if dest:
+                    details.append(f"vers {dest}")
+                if accn:
+                    details.append(f"compte {accn}")
+                
+                meta = " | ".join([t, f"{amt:.2f}€"] + details)
+                
+                # Affichage stylé de la dernière opération
+                st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); 
+                               padding: 1rem; border-radius: 10px; margin: 1rem 0;">
+                        <h5 style="color: white; margin: 0;">🗑️ Dernière opération</h5>
+                        <p style="color: #ffebee; margin: 0.5rem 0; font-size: 0.9rem;">
+                            {last.get('ts','')}
+                        </p>
+                        <p style="color: white; margin: 0; font-weight: bold;">
+                            {meta}
+                        </p>
+                    </div>
+                """, unsafe_allow_html=True)
+                
             except Exception:
-                pass
-            if st.button("Supprimer la dernière opération", key="delete_last_op"):
-                if delete_last_ledger_entry(st.session_state.pseudo):
-                    # Recharger le ledger depuis la DB
-                    st.session_state.ledger = load_user_ledger(st.session_state.pseudo)
-                    st.success("Dernière opération supprimée")
-                    st.rerun()
-                else:
-                    st.warning("Aucune opération à supprimer")
+                st.markdown("""
+                    <div style="background: #ff6b6b; padding: 1rem; border-radius: 10px; margin: 1rem 0;">
+                        <h5 style="color: white; margin: 0;">🗑️ Dernière opération</h5>
+                        <p style="color: white; margin: 0.5rem 0;">Informations non disponibles</p>
+                    </div>
+                """, unsafe_allow_html=True)
+            
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("🗑️ Supprimer la dernière", key="delete_last_op", type="secondary"):
+                    if delete_last_ledger_entry(st.session_state.pseudo):
+                        # Recharger le ledger depuis la DB
+                        st.session_state.ledger = load_user_ledger(st.session_state.pseudo)
+                        st.success("✅ Dernière opération supprimée")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Aucune opération à supprimer")
 
-        # Exécution rapide des règles (boutons)
+        # Section des règles avec style amélioré
         if st.session_state.rules:
-            st.subheader("Règles disponibles")
+            st.markdown("---")
+            st.markdown("""
+                <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                           padding: 1rem; border-radius: 10px; margin: 1rem 0;">
+                    <h4 style="color: white; margin: 0; text-align: center;">
+                        ⚡ Règles Rapides
+                    </h4>
+                </div>
+            """, unsafe_allow_html=True)
             for rule in st.session_state.rules:
                 cols = (
                     st.columns([2, 1]) if rule.get("require_value") else st.columns([3])
@@ -1204,7 +1278,15 @@ elif page == "Ledger":
                         st.rerun()
 
     with col_right:
-        st.subheader("Ajouter une opération manuelle")
+        # Section d'ajout d'opération avec style amélioré
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                       padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
+                <h4 style="color: white; margin: 0; text-align: center;">
+                    ✏️ Nouvelle Opération
+                </h4>
+            </div>
+        """, unsafe_allow_html=True)
         op_type = st.selectbox(
             "Type",
             ["expense", "deposit", "transfer", "adjustment"],
@@ -1294,29 +1376,111 @@ elif page == "Ledger":
                     st.success("Opération ajoutée")
                     st.rerun()
 
-    st.subheader("Journal des opérations")
+    # Journal des opérations avec design amélioré
+    st.markdown("---")
+    st.markdown("""
+        <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); 
+                   padding: 1rem; border-radius: 10px; margin: 1rem 0;">
+            <h4 style="color: white; margin: 0; text-align: center;">
+                📋 Journal des Opérations
+            </h4>
+        </div>
+    """, unsafe_allow_html=True)
+    
     if st.session_state.ledger:
         acc_id_to_name = {
             acc["account_id"]: acc["name"] for acc in st.session_state.accounts
         }
-        rows = []
-        for op in reversed(st.session_state.ledger):
-            t = op.get("type")
+        
+        # Afficher les dernières opérations sous forme de cartes
+        st.markdown("##### 🕒 Dernières opérations")
+        
+        # Limiter l'affichage aux 10 dernières opérations pour éviter la surcharge
+        recent_ops = list(reversed(st.session_state.ledger))[:10]
+        
+        for i, op in enumerate(recent_ops):
+            t = op.get("type", "")
             amt = op.get("amount_cents", 0) / 100
-            rows.append(
-                {
-                    "Date (UTC)": op.get("ts"),
-                    "Type": t,
-                    "Depuis": acc_id_to_name.get(op.get("src_account_id", ""), ""),
-                    "Vers": acc_id_to_name.get(op.get("dest_account_id", ""), ""),
-                    "Compte": acc_id_to_name.get(op.get("account_id", ""), ""),
-                    "Montant (€)": f"{amt:.2f}",
-                    "Note": op.get("note", ""),
-                }
-            )
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+            ts = op.get("ts", "")
+            note = op.get("note", "")
+            
+            # Icônes et couleurs selon le type
+            type_config = {
+                "deposit": {"icon": "💰", "color": "#28a745", "label": "Dépôt"},
+                "expense": {"icon": "💸", "color": "#dc3545", "label": "Dépense"},
+                "transfer": {"icon": "🔄", "color": "#007bff", "label": "Transfert"},
+                "adjustment": {"icon": "⚖️", "color": "#ffc107", "label": "Ajustement"}
+            }
+            
+            config = type_config.get(t, {"icon": "❓", "color": "#6c757d", "label": t})
+            
+            # Construction du texte détaillé
+            details = []
+            if op.get("src_account_id"):
+                details.append(f"Depuis: {acc_id_to_name.get(op.get('src_account_id'), 'N/A')}")
+            if op.get("dest_account_id"):
+                details.append(f"Vers: {acc_id_to_name.get(op.get('dest_account_id'), 'N/A')}")
+            if op.get("account_id"):
+                details.append(f"Compte: {acc_id_to_name.get(op.get('account_id'), 'N/A')}")
+            
+            detail_text = " | ".join(details) if details else ""
+            
+            # Formatage de la date
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                formatted_date = dt.strftime("%d/%m/%Y %H:%M")
+            except:
+                formatted_date = ts
+            
+            st.markdown(f"""
+                <div style="background: white; border-left: 4px solid {config['color']}; 
+                           padding: 1rem; margin: 0.5rem 0; border-radius: 0 8px 8px 0;
+                           box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                                <span style="font-size: 1.2rem; margin-right: 0.5rem;">{config['icon']}</span>
+                                <strong style="color: {config['color']};">{config['label']}</strong>
+                                <span style="margin-left: 1rem; color: #666; font-size: 0.9rem;">{formatted_date}</span>
+                            </div>
+                            {f'<div style="color: #555; font-size: 0.9rem; margin-bottom: 0.3rem;">{detail_text}</div>' if detail_text else ''}
+                            {f'<div style="color: #777; font-style: italic; font-size: 0.85rem;">💬 {note}</div>' if note else ''}
+                        </div>
+                        <div style="text-align: right; margin-left: 1rem;">
+                            <span style="font-size: 1.3rem; font-weight: bold; color: {config['color']};">
+                                {amt:+.2f} €
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        # Si il y a plus de 10 opérations, proposer de voir toutes via un expander
+        if len(st.session_state.ledger) > 10:
+            with st.expander(f"📊 Voir toutes les opérations ({len(st.session_state.ledger)} au total)"):
+                rows = []
+                for op in reversed(st.session_state.ledger):
+                    t = op.get("type")
+                    amt = op.get("amount_cents", 0) / 100
+                    rows.append({
+                        "Date (UTC)": op.get("ts"),
+                        "Type": t,
+                        "Depuis": acc_id_to_name.get(op.get("src_account_id", ""), ""),
+                        "Vers": acc_id_to_name.get(op.get("dest_account_id", ""), ""),
+                        "Compte": acc_id_to_name.get(op.get("account_id", ""), ""),
+                        "Montant (€)": f"{amt:.2f}",
+                        "Note": op.get("note", ""),
+                    })
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     else:
-        st.info("Aucune opération pour l'instant")
+        st.markdown("""
+            <div style="background: #f8f9fa; padding: 2rem; border-radius: 10px; text-align: center;">
+                <span style="font-size: 3rem;">📝</span>
+                <h4 style="color: #6c757d; margin: 1rem 0;">Aucune opération</h4>
+                <p style="color: #868e96;">Commencez par ajouter votre première opération !</p>
+            </div>
+        """, unsafe_allow_html=True)
 
 elif page == "Règles":
     st.header("Règles et Comptes")
