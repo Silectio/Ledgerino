@@ -1687,6 +1687,15 @@ elif page == "Ledger":
             except:
                 formatted_date = ts
             
+            # Construire les parties conditionnelles
+            detail_html = ""
+            if detail_text:
+                detail_html = f'<div style="color: #555; font-size: 0.9rem; margin-bottom: 0.3rem;">{detail_text}</div>'
+            
+            note_html = ""
+            if note:
+                note_html = f'<div style="color: #777; font-style: italic; font-size: 0.85rem;">💬 {note}</div>'
+            
             st.markdown(f"""
                 <div style="background: white; border-left: 4px solid {config['color']}; 
                            padding: 1rem; margin: 0.5rem 0; border-radius: 0 8px 8px 0;
@@ -1698,8 +1707,8 @@ elif page == "Ledger":
                                 <strong style="color: {config['color']};">{config['label']}</strong>
                                 <span style="margin-left: 1rem; color: #666; font-size: 0.9rem;">{formatted_date}</span>
                             </div>
-                            {f'<div style="color: #555; font-size: 0.9rem; margin-bottom: 0.3rem;">{detail_text}</div>' if detail_text else ''}
-                            {f'<div style="color: #777; font-style: italic; font-size: 0.85rem;">💬 {note}</div>' if note else ''}
+                            {detail_html}
+                            {note_html}
                         </div>
                         <div style="text-align: right; margin-left: 1rem;">
                             <span style="font-size: 1.3rem; font-weight: bold; color: {config['color']};">
