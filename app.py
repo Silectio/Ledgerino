@@ -79,6 +79,7 @@ def init_database_tables():
                     pseudo VARCHAR(50) REFERENCES users(pseudo) ON DELETE CASCADE,
                     account_id VARCHAR(50) NOT NULL,
                     name VARCHAR(100) NOT NULL,
+                    is_unlinked BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(pseudo, account_id)
                 )
@@ -132,9 +133,8 @@ def migrate_database():
     """Applique les migrations de base de données nécessaires."""
     engine = get_database_connection()
     with engine.begin() as conn:
-        # Migration : Ajouter la colonne use_balance_difference si elle n'existe pas
+        # Migration 1 : Ajouter la colonne use_balance_difference aux règles si elle n'existe pas
         try:
-            # Vérifier d'abord si la colonne existe
             result = conn.execute(
                 text(
                     """
@@ -146,7 +146,6 @@ def migrate_database():
             )
 
             if not result.fetchone():
-                # La colonne n'existe pas, l'ajouter
                 conn.execute(
                     text(
                         """
@@ -155,15 +154,46 @@ def migrate_database():
                     )
                 )
                 print(
-                    "✅ Migration appliquée : ajout de la colonne use_balance_difference"
+                    "✅ Migration appliquée : ajout de la colonne use_balance_difference aux règles"
                 )
             else:
                 print(
-                    "ℹ️ Migration déjà appliquée : colonne use_balance_difference existe"
+                    "ℹ️ Migration déjà appliquée : colonne use_balance_difference existe dans rules"
                 )
 
         except Exception as e:
-            print(f"⚠️ Erreur de migration : {e}")
+            print(f"⚠️ Erreur de migration rules.use_balance_difference : {e}")
+
+        # Migration 2 : Ajouter la colonne is_unlinked aux comptes si elle n'existe pas
+        try:
+            result = conn.execute(
+                text(
+                    """
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'accounts' AND column_name = 'is_unlinked'
+            """
+                )
+            )
+
+            if not result.fetchone():
+                conn.execute(
+                    text(
+                        """
+                    ALTER TABLE accounts ADD COLUMN is_unlinked BOOLEAN DEFAULT FALSE
+                """
+                    )
+                )
+                print(
+                    "✅ Migration appliquée : ajout de la colonne is_unlinked aux comptes"
+                )
+            else:
+                print(
+                    "ℹ️ Migration déjà appliquée : colonne is_unlinked existe dans accounts"
+                )
+
+        except Exception as e:
+            print(f"⚠️ Erreur de migration accounts.is_unlinked : {e}")
 
 
 # Initialise la base de données au démarrage
@@ -206,14 +236,21 @@ def load_user_accounts(pseudo: str) -> List[Dict]:
         result = conn.execute(
             text(
                 """
-            SELECT account_id, name FROM accounts 
+            SELECT account_id, name, is_unlinked FROM accounts 
             WHERE pseudo = :pseudo 
             ORDER BY created_at
         """
             ),
             {"pseudo": pseudo},
         )
-        return [{"account_id": row.account_id, "name": row.name} for row in result]
+        return [
+            {
+                "account_id": row.account_id,
+                "name": row.name,
+                "is_unlinked": row.is_unlinked or False,
+            }
+            for row in result
+        ]
 
 
 def load_user_ledger(pseudo: str) -> List[Dict]:
@@ -268,18 +305,23 @@ def load_user_rules(pseudo: str) -> List[Dict]:
         return rules
 
 
-def save_account(pseudo: str, account_id: str, name: str):
+def save_account(pseudo: str, account_id: str, name: str, is_unlinked: bool = False):
     """Sauvegarde un nouveau compte."""
     engine = get_database_connection()
     with engine.begin() as conn:
         conn.execute(
             text(
                 """
-            INSERT INTO accounts (pseudo, account_id, name) 
-            VALUES (:pseudo, :account_id, :name)
+            INSERT INTO accounts (pseudo, account_id, name, is_unlinked) 
+            VALUES (:pseudo, :account_id, :name, :is_unlinked)
         """
             ),
-            {"pseudo": pseudo, "account_id": account_id, "name": name},
+            {
+                "pseudo": pseudo,
+                "account_id": account_id,
+                "name": name,
+                "is_unlinked": is_unlinked,
+            },
         )
 
 
@@ -786,7 +828,7 @@ if "pseudo" not in st.session_state:
     st.session_state.pseudo = None
 
 # Choix de la vue
-page = st.sidebar.radio("Vue", ["Ledger", "Règles", "📊 Dashboard"], index=0)
+page = st.sidebar.radio("Vue", ["Ledger", "📊 Dashboard", "Règles"], index=0)
 
 # Sélection/chargement utilisateur
 st.sidebar.markdown("---")
@@ -854,6 +896,36 @@ def compute_balances() -> Dict[str, int]:
     return balances
 
 
+def get_linked_accounts() -> List[Dict]:
+    """Retourne uniquement les comptes linked (non-unlinked)."""
+    return [
+        acc for acc in st.session_state.accounts if not acc.get("is_unlinked", False)
+    ]
+
+
+def get_unlinked_accounts() -> List[Dict]:
+    """Retourne uniquement les comptes unlinked."""
+    return [acc for acc in st.session_state.accounts if acc.get("is_unlinked", False)]
+
+
+def compute_balances_by_type() -> Dict[str, Dict[str, int]]:
+    """Calcule les soldes séparés en linked et unlinked."""
+    balances = compute_balances()
+    linked_balances = {}
+    unlinked_balances = {}
+
+    for acc in st.session_state.accounts:
+        acc_id = acc["account_id"]
+        balance = balances.get(acc_id, 0)
+
+        if acc.get("is_unlinked", False):
+            unlinked_balances[acc_id] = balance
+        else:
+            linked_balances[acc_id] = balance
+
+    return {"linked": linked_balances, "unlinked": unlinked_balances}
+
+
 # UI
 st.title("💰 Ledger (simple)")
 
@@ -866,18 +938,59 @@ elif page == "Ledger":
 
     with col_left:
         st.subheader("Comptes et soldes")
-        balances = compute_balances()
-        rows_acc = [
-            {
-                "Nom": acc["name"],
-                "Solde (€)": f"{balances.get(acc['account_id'], 0) / 100:.2f}",
-            }
-            for acc in st.session_state.accounts
-        ]
-        total_cents = sum(
-            balances.get(acc["account_id"], 0) for acc in st.session_state.accounts
+        balances_by_type = compute_balances_by_type()
+
+        # Préparer les données pour l'affichage
+        rows_acc = []
+        for acc in st.session_state.accounts:
+            status_icon = "🔗" if not acc.get("is_unlinked", False) else "📎"
+            status_text = "Linked" if not acc.get("is_unlinked", False) else "Unlinked"
+            balance_eur = (
+                balances_by_type[
+                    "linked" if not acc.get("is_unlinked", False) else "unlinked"
+                ].get(acc["account_id"], 0)
+                / 100
+            )
+
+            rows_acc.append(
+                {
+                    "Nom": f"{status_icon} {acc['name']}",
+                    "Type": status_text,
+                    "Solde (€)": f"{balance_eur:.2f}",
+                }
+            )
+
+        # Calculer les totaux
+        linked_total = sum(balances_by_type["linked"].values()) / 100
+        unlinked_total = sum(balances_by_type["unlinked"].values()) / 100
+        grand_total = linked_total + unlinked_total
+
+        # Ajouter les lignes de totaux
+        rows_acc.append(
+            {"Nom": "━━━━━━━━━━━━━━", "Type": "━━━━━━━", "Solde (€)": "━━━━━━━━"}
         )
-        rows_acc.append({"Nom": "Total", "Solde (€)": f"{total_cents / 100:.2f}"})
+        rows_acc.append(
+            {
+                "Nom": "🔗 Total Linked",
+                "Type": "Subtotal",
+                "Solde (€)": f"{linked_total:.2f}",
+            }
+        )
+        rows_acc.append(
+            {
+                "Nom": "📎 Total Unlinked",
+                "Type": "Subtotal",
+                "Solde (€)": f"{unlinked_total:.2f}",
+            }
+        )
+        rows_acc.append(
+            {
+                "Nom": "💰 TOTAL GÉNÉRAL",
+                "Type": "Total",
+                "Solde (€)": f"{grand_total:.2f}",
+            }
+        )
+
         df_acc = pd.DataFrame(rows_acc)
         st.dataframe(df_acc, width="stretch")
 
@@ -928,9 +1041,11 @@ elif page == "Ledger":
                     if rule.get("require_value"):
                         label_text = f"Valeur (€) — {rule['name']}"
                         if rule.get("use_balance_difference"):
-                            current_balances = compute_balances()
-                            current_total = sum(current_balances.values()) / 100.0
-                            label_text = f"Valeur cible (€) — {rule['name']} [Solde actuel: {current_total:.2f}€]"
+                            balances_by_type = compute_balances_by_type()
+                            current_linked_total = (
+                                sum(balances_by_type["linked"].values()) / 100.0
+                            )
+                            label_text = f"Valeur cible (€) — {rule['name']} [Solde linked: {current_linked_total:.2f}€]"
                         value_input = st.number_input(
                             label_text,
                             key=f"rule_val_{rule['rule_id']}",
@@ -942,16 +1057,25 @@ elif page == "Ledger":
                         # Afficher l'aide en temps réel quand une valeur est saisie
                         if value_input and value_input > 0:
                             if rule.get("use_balance_difference", False):
-                                # Mode différence de solde
-                                current_balances = compute_balances()
-                                current_total_cents = sum(current_balances.values())
-                                current_total_eur = current_total_cents / 100.0
+                                # Mode différence de solde (uniquement comptes linked)
+                                balances_by_type = compute_balances_by_type()
+                                current_linked_total_cents = sum(
+                                    balances_by_type["linked"].values()
+                                )
+                                current_linked_total_eur = (
+                                    current_linked_total_cents / 100.0
+                                )
+                                current_unlinked_total_eur = (
+                                    sum(balances_by_type["unlinked"].values()) / 100.0
+                                )
                                 target_value_eur = value_input
-                                difference_eur = target_value_eur - current_total_eur
+                                difference_eur = (
+                                    target_value_eur - current_linked_total_eur
+                                )
 
                                 if abs(difference_eur) < 0.01:
                                     st.info(
-                                        f"📊 Solde actuel: {current_total_eur:.2f}€, Cible: {target_value_eur:.2f}€ → Aucun ajustement nécessaire"
+                                        f"📊 Solde linked: {current_linked_total_eur:.2f}€, Cible: {target_value_eur:.2f}€ → Aucun ajustement nécessaire"
                                     )
                                 else:
                                     with st.expander(
@@ -959,13 +1083,16 @@ elif page == "Ledger":
                                         expanded=True,
                                     ):
                                         st.write(
-                                            f"**Solde actuel:** {current_total_eur:.2f}€"
+                                            f"**🔗 Solde linked:** {current_linked_total_eur:.2f}€"
                                         )
                                         st.write(
-                                            f"**Valeur cible:** {target_value_eur:.2f}€"
+                                            f"**📎 Solde unlinked:** {current_unlinked_total_eur:.2f}€"
                                         )
                                         st.write(
-                                            f"**Différence:** {difference_eur:+.2f}€"
+                                            f"**🎯 Valeur cible (linked):** {target_value_eur:.2f}€"
+                                        )
+                                        st.write(
+                                            f"**📊 Différence à répartir:** {difference_eur:+.2f}€"
                                         )
                             else:
                                 # Mode normal
@@ -981,11 +1108,15 @@ elif page == "Ledger":
                         if rule.get("use_balance_difference", False) and rule.get(
                             "require_value"
                         ):
-                            # Mode différence de solde : calculer la différence entre la valeur saisie et le solde total
-                            current_balances = compute_balances()
-                            current_total_cents = sum(current_balances.values())
+                            # Mode différence de solde : calculer la différence entre la valeur saisie et le solde linked uniquement
+                            balances_by_type = compute_balances_by_type()
+                            current_linked_total_cents = sum(
+                                balances_by_type["linked"].values()
+                            )
                             target_value_cents = int(round((value_input or 0.0) * 100))
-                            base_value_cents = target_value_cents - current_total_cents
+                            base_value_cents = (
+                                target_value_cents - current_linked_total_cents
+                            )
 
                             # Vérifier si il y a une différence significative
                             if (
@@ -1214,6 +1345,11 @@ elif page == "Règles":
             placeholder="mon_compte",
             help="Identifiant unique (lettres, chiffres, tirets, underscores)",
         )
+        is_unlinked = st.checkbox(
+            "Compte unlinked",
+            value=False,
+            help="Les comptes unlinked ne sont pas pris en compte dans les calculs de différence des règles",
+        )
         submitted = st.form_submit_button("Créer")
         if submitted:
             if not new_name or not new_id:
@@ -1223,9 +1359,9 @@ elif page == "Règles":
             elif account_index(new_id) is not None:
                 st.error("ID déjà existant")
             else:
-                save_account(st.session_state.pseudo, new_id, new_name)
+                save_account(st.session_state.pseudo, new_id, new_name, is_unlinked)
                 st.session_state.accounts.append(
-                    {"account_id": new_id, "name": new_name}
+                    {"account_id": new_id, "name": new_name, "is_unlinked": is_unlinked}
                 )
                 st.success("Compte créé")
                 st.rerun()
