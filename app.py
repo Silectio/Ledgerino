@@ -1314,7 +1314,7 @@ elif page == "Ledger":
                     "Note": op.get("note", ""),
                 }
             )
-        st.dataframe(pd.DataFrame(rows), width="stretch")
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
     else:
         st.info("Aucune opération pour l'instant")
 
@@ -1336,6 +1336,7 @@ elif page == "Règles":
             ]
         ),
         width="stretch",
+        hide_index=True,
     )
 
     with st.form("create_account_form_rules", clear_on_submit=True):
