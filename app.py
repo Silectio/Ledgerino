@@ -1086,7 +1086,12 @@ if "pseudo" not in st.session_state:
     st.session_state.pseudo = None
 
 # Choix de la vue
-page = st.sidebar.radio("Vue", ["Ledger", "📊 Dashboard", "Règles"], index=0)
+page = st.sidebar.selectbox(
+    "📍 Navigation", 
+    ["💰 Ledger", "📊 Dashboard", "⚙️ Règles"], 
+    index=0,
+    format_func=lambda x: x  # Afficher directement avec les icônes
+)
 
 # Sélection/chargement utilisateur
 st.sidebar.markdown("---")
@@ -1189,7 +1194,7 @@ if not st.session_state.pseudo:
     st.warning(
         "Saisissez un pseudo dans la barre latérale puis cliquez 'Charger cet utilisateur'."
     )
-elif page == "Ledger":
+elif page == "💰 Ledger":
     # En-tête moderne pour la page Ledger
     st.markdown("""
         <div style="background: linear-gradient(90deg, #11998e 0%, #38ef7d 100%); 
@@ -1687,37 +1692,31 @@ elif page == "Ledger":
             except:
                 formatted_date = ts
             
-            # Construire les parties conditionnelles
-            detail_html = ""
-            if detail_text:
-                detail_html = f'<div style="color: #555; font-size: 0.9rem; margin-bottom: 0.3rem;">{detail_text}</div>'
+            # Utiliser une approche plus simple et sûre
+            col_content, col_amount = st.columns([3, 1])
             
-            note_html = ""
-            if note:
-                note_html = f'<div style="color: #777; font-style: italic; font-size: 0.85rem;">💬 {note}</div>'
-            
-            st.markdown(f"""
-                <div style="background: white; border-left: 4px solid {config['color']}; 
-                           padding: 1rem; margin: 0.5rem 0; border-radius: 0 8px 8px 0;
-                           box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div style="flex: 1;">
-                            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
-                                <span style="font-size: 1.2rem; margin-right: 0.5rem;">{config['icon']}</span>
-                                <strong style="color: {config['color']};">{config['label']}</strong>
-                                <span style="margin-left: 1rem; color: #666; font-size: 0.9rem;">{formatted_date}</span>
-                            </div>
-                            {detail_html}
-                            {note_html}
-                        </div>
-                        <div style="text-align: right; margin-left: 1rem;">
-                            <span style="font-size: 1.3rem; font-weight: bold; color: {config['color']};">
-                                {amt:+.2f} €
-                            </span>
+            with col_content:
+                st.markdown(f"""
+                    <div style="border-left: 4px solid {config['color']}; padding-left: 1rem;">
+                        <div style="display: flex; align-items: center; margin-bottom: 0.3rem;">
+                            <span style="font-size: 1.2rem; margin-right: 0.5rem;">{config['icon']}</span>
+                            <strong style="color: {config['color']};">{config['label']}</strong>
+                            <span style="margin-left: 1rem; color: #666; font-size: 0.9rem;">{formatted_date}</span>
                         </div>
                     </div>
-                </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+                
+                if detail_text:
+                    st.caption(detail_text)
+                
+                if note:
+                    st.caption(f"💬 {note}")
+            
+            with col_amount:
+                color_class = "green" if amt >= 0 else "red"
+                st.markdown(f":{color_class}[**{amt:+.2f} €**]")
+            
+            st.markdown("---")
         
         # Si il y a plus de 10 opérations, proposer de voir toutes via un expander
         if len(st.session_state.ledger) > 10:
@@ -1745,7 +1744,7 @@ elif page == "Ledger":
             </div>
         """, unsafe_allow_html=True)
 
-elif page == "Règles":
+elif page == "⚙️ Règles":
     st.header("Règles et Comptes")
 
     # Gestion des comptes (déplacée ici)
@@ -2452,14 +2451,11 @@ elif page == "📊 Dashboard":
 
         st.markdown("---")
 
-        # Onglets améliorés avec plus d'analyses
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        # Onglets simplifiés
+        tab1, tab2, tab3 = st.tabs([
             "📈 Évolution & Tendances",
             "🏦 Analyse par Compte", 
-            "💰 Répartition & Structure",
-            "💎 Simulations d'Intérêts",
-            "🔮 Prédictions & IA",
-            "🎯 Insights & Recommandations"
+            "💰 Répartition & Structure"
         ])
 
         with tab1:
@@ -2744,8 +2740,6 @@ elif page == "📊 Dashboard":
                     st.write(f"**:{color}[Total: {total_balance:.2f} €]**")
             else:
                 st.info("Aucun compte trouvé")
-
-        with tab4:
             st.markdown("### 💎 Simulateur d'Intérêts Interactif")
             
             # Paramètres de simulation dans la sidebar
@@ -3079,319 +3073,3 @@ elif page == "📊 Dashboard":
                             2. Réinvestir les gains en tokens NEXO
                             3. Augmenter progressivement selon les performances
                             """)
-
-        with tab5:
-            st.subheader("🔮 Prédictions et Analyse des Flux")
-
-            if show_predictions:
-                # Analyse des flux récents
-                flows_df = get_daily_flow_analysis(st.session_state.ledger, period_days)
-
-                if not flows_df.empty:
-                    col_pred1, col_pred2 = st.columns([2, 1])
-
-                    with col_pred1:
-                        # Graphique des flux avec moyennes mobiles
-                        fig_flows_pred = go.Figure()
-
-                        fig_flows_pred.add_trace(
-                            go.Bar(
-                                x=flows_df["date"],
-                                y=flows_df["recettes"],
-                                name="Recettes",
-                                marker_color="green",
-                                opacity=0.7,
-                            )
-                        )
-
-                        fig_flows_pred.add_trace(
-                            go.Bar(
-                                x=flows_df["date"],
-                                y=-flows_df["depenses"],
-                                name="Dépenses",
-                                marker_color="red",
-                                opacity=0.7,
-                            )
-                        )
-
-                        # Moyennes mobiles si on a assez de données
-                        if len(flows_df) > 7:
-                            flows_df["recettes_ma"] = (
-                                flows_df["recettes"].rolling(7, min_periods=1).mean()
-                            )
-                            flows_df["depenses_ma"] = (
-                                flows_df["depenses"].rolling(7, min_periods=1).mean()
-                            )
-
-                            fig_flows_pred.add_trace(
-                                go.Scatter(
-                                    x=flows_df["date"],
-                                    y=flows_df["recettes_ma"],
-                                    mode="lines",
-                                    name="Trend Recettes (7j)",
-                                    line=dict(color="darkgreen", width=2),
-                                )
-                            )
-
-                            fig_flows_pred.add_trace(
-                                go.Scatter(
-                                    x=flows_df["date"],
-                                    y=-flows_df["depenses_ma"],
-                                    mode="lines",
-                                    name="Trend Dépenses (7j)",
-                                    line=dict(color="darkred", width=2),
-                                )
-                            )
-
-                        fig_flows_pred.update_layout(
-                            title=f"Analyse des flux sur {period_days} jours",
-                            xaxis_title="Date",
-                            yaxis_title="Montant (€)",
-                            barmode="relative",
-                            showlegend=True,
-                        )
-
-                        st.plotly_chart(fig_flows_pred, width="stretch")
-
-                    with col_pred2:
-                        # Métriques de prédiction
-                        total_recettes = flows_df["recettes"].sum()
-                        total_depenses = flows_df["depenses"].sum()
-                        avg_daily_net = (total_recettes - total_depenses) / len(
-                            flows_df
-                        )
-
-                        st.metric("💹 Flux net moyen/jour", f"{avg_daily_net:.2f} €")
-
-                        # Prédictions simples
-                        pred_7j = avg_daily_net * 7
-                        pred_30j = avg_daily_net * 30
-                        pred_horizon = avg_daily_net * prediction_days
-
-                        st.metric("📈 Prédiction 7j", f"{pred_7j:+.2f} €")
-                        st.metric("📅 Prédiction 30j", f"{pred_30j:+.2f} €")
-                        st.metric(
-                            f"🔮 Prédiction {prediction_days}j",
-                            f"{pred_horizon:+.2f} €",
-                        )
-
-                        # Volatilité
-                        if len(flows_df) > 1:
-                            daily_net = flows_df["recettes"] - flows_df["depenses"]
-                            volatility = daily_net.std()
-                            st.metric(
-                                "📊 Volatilité quotidienne", f"{volatility:.2f} €"
-                            )
-
-                        # Conseils basés sur les tendances
-                        st.subheader("💡 Insights")
-                        if avg_daily_net > 0:
-                            st.success(
-                                f"🟢 Tendance positive: +{avg_daily_net:.2f}€/jour en moyenne"
-                            )
-                        elif avg_daily_net < 0:
-                            st.warning(
-                                f"🟡 Tendance négative: {avg_daily_net:.2f}€/jour en moyenne"
-                            )
-                        else:
-                            st.info("⚪ Tendance neutre")
-
-                        # Prédiction de date d'épuisement/enrichissement
-                        current_balance = kpis.get("solde_actuel", 0)
-                        if avg_daily_net < 0 and current_balance > 0:
-                            days_to_zero = current_balance / abs(avg_daily_net)
-                            if days_to_zero < 90:
-                                st.error(
-                                    f"⚠️ Solde épuisé dans ~{days_to_zero:.0f} jours au rythme actuel"
-                                )
-                        elif avg_daily_net > 0:
-                            days_to_double = (
-                                current_balance / avg_daily_net
-                                if current_balance > 0
-                                else float("inf")
-                            )
-                            if days_to_double < 365:
-                                st.success(
-                                    f"📈 Solde doublé dans ~{days_to_double:.0f} jours au rythme actuel"
-                                )
-
-                else:
-                    st.info("Pas assez de données pour les prédictions")
-            else:
-                st.info(
-                    "Activez les prédictions dans la sidebar pour voir cette section"
-                )
-
-        with tab6:
-            st.markdown("#### 🎯 Insights & Recommandations")
-            
-            # Analyse intelligente basée sur les données
-            col_insights, col_reco = st.columns([1, 1])
-            
-            with col_insights:
-                st.markdown("##### 🔍 Analyse Automatique")
-                
-                # Calculs pour les insights
-                linked_total = sum(balances_by_type["linked"].values()) / 100
-                unlinked_total = sum(balances_by_type["unlinked"].values()) / 100
-                total_net_worth = linked_total + unlinked_total
-                
-                # Ratios d'analyse
-                if total_net_worth > 0:
-                    linked_ratio = (linked_total / total_net_worth) * 100
-                    unlinked_ratio = (unlinked_total / total_net_worth) * 100
-                    
-                    # Insights automatiques
-                    insights = []
-                    
-                    if linked_ratio > 80:
-                        insights.append("⚠️ **Liquidité élevée**: Plus de 80% de vos fonds sont en comptes linked (opérationnels)")
-                    elif linked_ratio < 20:
-                        insights.append("💰 **Épargne importante**: Plus de 80% de vos fonds sont en comptes unlinked")
-                    
-                    if kpis.get('tendance_7j', 0) > 0:
-                        insights.append(f"📈 **Tendance positive**: +{kpis.get('tendance_7j', 0):.2f}€ sur 7 jours")
-                    elif kpis.get('tendance_7j', 0) < -50:
-                        insights.append(f"📉 **Attention**: Tendance négative de {kpis.get('tendance_7j', 0):.2f}€ sur 7j")
-                    
-                    avg_expense = kpis.get('depense_moy_jour', 0)
-                    if avg_expense > 0 and linked_total > 0:
-                        autonomy_days = linked_total / avg_expense
-                        if autonomy_days < 30:
-                            insights.append(f"🚨 **Autonomie limitée**: Seulement {autonomy_days:.0f} jours d'autonomie")
-                        elif autonomy_days > 365:
-                            insights.append(f"✅ **Excellente autonomie**: Plus d'1 an d'autonomie financière")
-                    
-                    # Analyse de la volatilité
-                    volatility = abs(kpis.get('tendance_7j', 0)) / 7
-                    if volatility > 20:
-                        insights.append("📊 **Volatilité élevée**: Variations importantes dans vos finances")
-                    elif volatility < 5:
-                        insights.append("📊 **Finances stables**: Faible volatilité détectée")
-                    
-                    for insight in insights:
-                        st.markdown(f"- {insight}")
-                        
-                    if not insights:
-                        st.info("💡 Pas d'insights particuliers détectés. Continuez à alimenter vos données!")
-                
-                # Statistiques avancées
-                st.markdown("##### 📊 Statistiques Avancées")
-                
-                stats_data = {
-                    "Métrique": [
-                        "Ratio Linked/Total",
-                        "Autonomie Financière", 
-                        "Croissance Mensuelle",
-                        "Score de Diversification"
-                    ],
-                    "Valeur": [
-                        f"{linked_ratio:.1f}%",
-                        f"{linked_total/avg_expense:.0f} jours" if avg_expense > 0 else "∞",
-                        f"{kpis.get('tendance_7j', 0)*4.3:+.0f} €/mois",
-                        f"{min(len([acc for acc in st.session_state.accounts if not acc.get('is_unlinked', False)]), 5)}/5"
-                    ]
-                }
-                
-                st.dataframe(pd.DataFrame(stats_data), width='stretch', hide_index=True)
-            
-            with col_reco:
-                st.markdown("##### 💡 Recommandations Personnalisées")
-                
-                recommendations = []
-                
-                # Recommandations basées sur les ratios
-                if linked_ratio > 85:
-                    recommendations.append({
-                        "type": "💰 Épargne",
-                        "titre": "Diversifier votre épargne",
-                        "description": "Considérez créer des comptes unlinked pour séparer épargne et liquidités",
-                        "priorité": "Moyenne"
-                    })
-                
-                if unlinked_total < 1000 and linked_total > 2000:
-                    recommendations.append({
-                        "type": "🎯 Planification",
-                        "titre": "Constituer une épargne de précaution",
-                        "description": "Transférez une partie vers des comptes unlinked pour l'épargne",
-                        "priorité": "Haute"
-                    })
-                
-                if avg_expense > 0 and linked_total / avg_expense < 60:
-                    recommendations.append({
-                        "type": "🚨 Urgent",
-                        "titre": "Renforcer la trésorerie",
-                        "description": "Moins de 2 mois d'autonomie. Augmentez vos comptes linked",
-                        "priorité": "Critique"
-                    })
-                
-                if kpis.get('tendance_7j', 0) < -100:
-                    recommendations.append({
-                        "type": "📉 Contrôle",
-                        "titre": "Analyser les dépenses",
-                        "description": "Tendance négative importante. Révisez votre budget",
-                        "priorité": "Haute"
-                    })
-                
-                if len(st.session_state.accounts) < 3:
-                    recommendations.append({
-                        "type": "🏦 Organisation",
-                        "titre": "Diversifier vos comptes",
-                        "description": "Créez des comptes spécialisés (épargne, projets, etc.)",
-                        "priorité": "Basse"
-                    })
-                
-                # Affichage des recommandations
-                for i, reco in enumerate(recommendations):
-                    priority_color = {
-                        "Critique": "#ff4444",
-                        "Haute": "#ff8800", 
-                        "Moyenne": "#ffbb00",
-                        "Basse": "#00bb00"
-                    }.get(reco["priorité"], "#666666")
-                    
-                    st.markdown(f"""
-                        <div style="border-left: 4px solid {priority_color}; 
-                                   padding: 1rem; margin: 1rem 0; 
-                                   background: #f8f9fa; border-radius: 0 8px 8px 0;">
-                            <h4 style="margin: 0; color: {priority_color};">{reco['type']}</h4>
-                            <h5 style="margin: 0.5rem 0;">{reco['titre']}</h5>
-                            <p style="margin: 0; color: #666;">{reco['description']}</p>
-                            <small style="color: {priority_color};">Priorité: {reco['priorité']}</small>
-                        </div>
-                    """, unsafe_allow_html=True)
-                
-                if not recommendations:
-                    st.success("✅ Vos finances semblent bien organisées ! Aucune recommandation urgente.")
-            
-            # Section objectifs et planification
-            st.markdown("---")
-            st.markdown("##### 🎯 Planification d'Objectifs")
-            
-            col_obj1, col_obj2 = st.columns(2)
-            
-            with col_obj1:
-                st.markdown("**💰 Simulateur d'Épargne**")
-                target_amount = st.number_input("Objectif d'épargne (€)", min_value=0.0, value=5000.0, step=100.0)
-                monthly_savings = st.number_input("Épargne mensuelle (€)", min_value=0.0, value=200.0, step=10.0)
-                
-                if monthly_savings > 0:
-                    months_needed = target_amount / monthly_savings
-                    st.info(f"⏱️ Temps nécessaire: **{months_needed:.1f} mois** ({months_needed/12:.1f} ans)")
-                    
-            with col_obj2:
-                st.markdown("**📊 Projection Patrimoine**")
-                if kpis.get('tendance_7j', 0) != 0:
-                    monthly_trend = kpis.get('tendance_7j', 0) * 4.3  # 7j * 4.3 ≈ 30j
-                    current_net_worth = total_net_worth
-                    
-                    projections = []
-                    for months in [3, 6, 12]:
-                        future_value = current_net_worth + (monthly_trend * months)
-                        projections.append(f"**{months}M**: {future_value:,.0f}€")
-                    
-                    st.write("Projections basées sur la tendance:")
-                    for proj in projections:
-                        st.write(f"- {proj}")
-                else:
-                    st.info("Pas assez de données pour les projections")
