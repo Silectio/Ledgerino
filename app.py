@@ -992,7 +992,7 @@ elif page == "Ledger":
         )
 
         df_acc = pd.DataFrame(rows_acc)
-        st.dataframe(df_acc, width="stretch")
+        st.dataframe(df_acc, width="stretch", hide_index=True)
 
         # Bouton pour supprimer la dernière opération du ledger
         if st.session_state.ledger:
