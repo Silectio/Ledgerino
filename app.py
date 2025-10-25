@@ -809,6 +809,145 @@ if "accounts" not in st.session_state:
 
 if "ledger" not in st.session_state:
     st.session_state.ledger = []
+# Fonctions de calcul d'intérêts pour le dashboard
+def calculate_interest_simulation(
+    balance_eur: float,
+    annual_rate: float,
+    period_months: int = 12,
+    compound_frequency: int = 365,  # Capitalisation quotidienne
+    nexo_percentage: float = 0.0  # % de NEXO tokens pour bonus
+) -> Dict:
+    """
+    Calcule les intérêts composés avec possibilité de bonus NEXO.
+    
+    Args:
+        balance_eur: Solde de départ en euros
+        annual_rate: Taux annuel en % (ex: 8.5 pour 8.5%)
+        period_months: Période de simulation en mois
+        compound_frequency: Fréquence de capitalisation par an (365 = quotidien)
+        nexo_percentage: % du portefeuille en tokens NEXO (0-100%)
+    
+    Returns:
+        Dict contenant les résultats de simulation
+    """
+    if balance_eur <= 0:
+        return {
+            "initial_balance": 0,
+            "final_balance": 0,
+            "total_interest": 0,
+            "monthly_interest": 0,
+            "effective_rate": annual_rate,
+            "nexo_bonus": 0
+        }
+    
+    # Calculer le bonus NEXO (jusqu'à +2% selon le % de NEXO détenu)
+    nexo_bonus = 0
+    if nexo_percentage >= 10:  # Seuil minimum pour bonus
+        # Bonus progressif: 0.5% pour 10% NEXO, jusqu'à 2% pour 20%+ NEXO
+        nexo_bonus = min(2.0, (nexo_percentage / 10) * 0.5)
+    
+    effective_rate = annual_rate + nexo_bonus
+    
+    # Formule des intérêts composés: A = P(1 + r/n)^(nt)
+    # P = capital initial, r = taux annuel, n = fréquence, t = temps en années
+    rate_decimal = effective_rate / 100
+    time_years = period_months / 12
+    
+    final_balance = balance_eur * (1 + rate_decimal / compound_frequency) ** (compound_frequency * time_years)
+    total_interest = final_balance - balance_eur
+    monthly_interest = total_interest / period_months if period_months > 0 else 0
+    
+    return {
+        "initial_balance": balance_eur,
+        "final_balance": final_balance,
+        "total_interest": total_interest,
+        "monthly_interest": monthly_interest,
+        "effective_rate": effective_rate,
+        "nexo_bonus": nexo_bonus,
+        "annual_rate": annual_rate
+    }
+
+def calculate_platform_interests(balances_by_type: Dict) -> Dict:
+    """
+    Calcule les simulations d'intérêts pour les différentes plateformes.
+    
+    Args:
+        balances_by_type: Dict avec les soldes par type (linked/unlinked)
+    
+    Returns:
+        Dict avec les simulations par plateforme
+    """
+    linked_balance = sum(balances_by_type["linked"].values()) / 100  # Conversion en euros
+    unlinked_balance = sum(balances_by_type["unlinked"].values()) / 100
+    
+    # Configuration des plateformes avec leurs taux
+    platforms = {
+        "nexo": {
+            "name": "Nexo (Linked)",
+            "balance": linked_balance,
+            "base_rate": 8.5,  # Taux de base Nexo
+            "supports_nexo_bonus": True,
+            "description": "Comptes opérationnels sur Nexo"
+        },
+        "numerai": {
+            "name": "Numerai (Unlinked)",
+            "balance": unlinked_balance * 0.3,  # Estimation 30% sur Numerai
+            "base_rate": 12.0,  # Taux Numerai
+            "supports_nexo_bonus": False,
+            "description": "Staking NMR sur Numerai"
+        },
+        "bricks": {
+            "name": "Bricks (Unlinked)",
+            "balance": unlinked_balance * 0.4,  # Estimation 40% sur Bricks
+            "base_rate": 6.5,  # Taux Bricks immobilier
+            "supports_nexo_bonus": False,
+            "description": "Investissement immobilier tokenisé"
+        },
+        "autres": {
+            "name": "Autres Plateformes",
+            "balance": unlinked_balance * 0.3,  # 30% restant
+            "base_rate": 5.0,  # Taux conservateur
+            "supports_nexo_bonus": False,
+            "description": "Diversification autres plateformes"
+        }
+    }
+    
+    results = {}
+    
+    for platform_id, config in platforms.items():
+        if config["balance"] > 0:
+            # Simulations sur 1, 6 et 12 mois
+            simulations = {}
+            for months in [1, 6, 12]:
+                if config["supports_nexo_bonus"]:
+                    # Pour Nexo, simuler différents niveaux de NEXO tokens
+                    nexo_levels = [0, 10, 15, 20]  # % de NEXO tokens
+                    nexo_sims = {}
+                    for nexo_pct in nexo_levels:
+                        sim = calculate_interest_simulation(
+                            config["balance"], 
+                            config["base_rate"], 
+                            months,
+                            nexo_percentage=nexo_pct
+                        )
+                        nexo_sims[f"nexo_{nexo_pct}pct"] = sim
+                    simulations[f"{months}m"] = nexo_sims
+                else:
+                    # Pour les autres plateformes, simulation simple
+                    sim = calculate_interest_simulation(
+                        config["balance"], 
+                        config["base_rate"], 
+                        months
+                    )
+                    simulations[f"{months}m"] = sim
+            
+            results[platform_id] = {
+                "config": config,
+                "simulations": simulations
+            }
+    
+    return results
+
 
 if "rules" not in st.session_state:
     st.session_state.rules = []
@@ -926,8 +1065,6 @@ def compute_balances_by_type() -> Dict[str, Dict[str, int]]:
     return {"linked": linked_balances, "unlinked": unlinked_balances}
 
 
-# UI
-st.title("💰 Ledger (simple)")
 
 if not st.session_state.pseudo:
     st.warning(
@@ -1096,6 +1233,107 @@ elif page == "Ledger":
                         st.warning("⚠️ Aucune opération à supprimer")
 
         # Section des règles avec style amélioré
+
+
+    with col_right:
+        # Section d'ajout d'opération avec style amélioré
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                       padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
+                <h4 style="color: white; margin: 0; text-align: center;">
+                    ✏️ Nouvelle Opération
+                </h4>
+            </div>
+        """, unsafe_allow_html=True)
+        op_type = st.selectbox(
+            "Type",
+            ["expense", "deposit", "transfer", "adjustment"],
+            format_func=lambda t: {
+                "deposit": "Dépôt",
+                "expense": "Dépense",
+                "transfer": "Transfert",
+                "adjustment": "Ajustement",
+            }[t],
+        )
+
+        # Sélecteurs de comptes selon le type
+        acc_map_name_to_id = {
+            acc["name"]: acc["account_id"] for acc in st.session_state.accounts
+        }
+        acc_names = list(acc_map_name_to_id.keys())
+
+        src_id: Optional[str] = None
+        dest_id: Optional[str] = None
+        adj_id: Optional[str] = None
+
+        if op_type == "deposit":
+            dest_name = st.selectbox("Vers", acc_names)
+            dest_id = acc_map_name_to_id[dest_name]
+        elif op_type == "expense":
+            src_name = st.selectbox("Depuis", acc_names)
+            src_id = acc_map_name_to_id[src_name]
+        elif op_type == "transfer":
+            c1, c2 = st.columns(2)
+            with c1:
+                src_name = st.selectbox("Depuis", acc_names, key="tx_src")
+                src_id = acc_map_name_to_id[src_name]
+            with c2:
+                dest_name = st.selectbox(
+                    "Vers",
+                    [n for n in acc_names if acc_map_name_to_id[n] != src_id],
+                    key="tx_dest",
+                )
+                dest_id = acc_map_name_to_id[dest_name]
+        elif op_type == "adjustment":
+            adj_name = st.selectbox("Compte", acc_names)
+            adj_id = acc_map_name_to_id[adj_name]
+
+        amount_eur = st.number_input(
+            "Montant (€)",
+            step=0.01,
+            format="%.2f",
+            help="Toujours en euros; stocké en cents",
+        )
+        note = st.text_input("Note", placeholder="Commentaire…")
+
+        if st.button("Ajouter l'opération", type="primary"):
+            if op_type != "adjustment" and amount_eur <= 0:
+                st.error("Montant strictement positif requis")
+            else:
+                amt_cents = int(round(amount_eur * 100))
+                base = {"ts": now_iso_utc(), "type": op_type, "note": note}
+                entry = None
+                if op_type == "deposit":
+                    entry = {
+                        **base,
+                        "amount_cents": amt_cents,
+                        "dest_account_id": dest_id,
+                    }
+                elif op_type == "expense":
+                    entry = {
+                        **base,
+                        "amount_cents": amt_cents,
+                        "src_account_id": src_id,
+                    }
+                elif op_type == "transfer":
+                    if src_id == dest_id:
+                        st.error("Comptes source et destinataire différents requis")
+                    else:
+                        entry = {
+                            **base,
+                            "amount_cents": amt_cents,
+                            "src_account_id": src_id,
+                            "dest_account_id": dest_id,
+                        }
+                elif op_type == "adjustment":
+                    # Ajustement autorise les montants signés
+                    entry = {**base, "amount_cents": amt_cents, "account_id": adj_id}
+                if entry is not None:
+                    save_ledger_entry(st.session_state.pseudo, entry)
+                    st.session_state.ledger.append(entry)
+                    st.success("Opération ajoutée")
+                    st.rerun()
+                    
         if st.session_state.rules:
             st.markdown("---")
             st.markdown("""
@@ -1276,106 +1514,6 @@ elif page == "Ledger":
                                 st.session_state.ledger.append(entry)
                         st.success(f"Règle '{rule['name']}' exécutée")
                         st.rerun()
-
-    with col_right:
-        # Section d'ajout d'opération avec style amélioré
-        st.markdown("""
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                       padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
-                <h4 style="color: white; margin: 0; text-align: center;">
-                    ✏️ Nouvelle Opération
-                </h4>
-            </div>
-        """, unsafe_allow_html=True)
-        op_type = st.selectbox(
-            "Type",
-            ["expense", "deposit", "transfer", "adjustment"],
-            format_func=lambda t: {
-                "deposit": "Dépôt",
-                "expense": "Dépense",
-                "transfer": "Transfert",
-                "adjustment": "Ajustement",
-            }[t],
-        )
-
-        # Sélecteurs de comptes selon le type
-        acc_map_name_to_id = {
-            acc["name"]: acc["account_id"] for acc in st.session_state.accounts
-        }
-        acc_names = list(acc_map_name_to_id.keys())
-
-        src_id: Optional[str] = None
-        dest_id: Optional[str] = None
-        adj_id: Optional[str] = None
-
-        if op_type == "deposit":
-            dest_name = st.selectbox("Vers", acc_names)
-            dest_id = acc_map_name_to_id[dest_name]
-        elif op_type == "expense":
-            src_name = st.selectbox("Depuis", acc_names)
-            src_id = acc_map_name_to_id[src_name]
-        elif op_type == "transfer":
-            c1, c2 = st.columns(2)
-            with c1:
-                src_name = st.selectbox("Depuis", acc_names, key="tx_src")
-                src_id = acc_map_name_to_id[src_name]
-            with c2:
-                dest_name = st.selectbox(
-                    "Vers",
-                    [n for n in acc_names if acc_map_name_to_id[n] != src_id],
-                    key="tx_dest",
-                )
-                dest_id = acc_map_name_to_id[dest_name]
-        elif op_type == "adjustment":
-            adj_name = st.selectbox("Compte", acc_names)
-            adj_id = acc_map_name_to_id[adj_name]
-
-        amount_eur = st.number_input(
-            "Montant (€)",
-            step=0.01,
-            format="%.2f",
-            help="Toujours en euros; stocké en cents",
-        )
-        note = st.text_input("Note", placeholder="Commentaire…")
-
-        if st.button("Ajouter l'opération", type="primary"):
-            if op_type != "adjustment" and amount_eur <= 0:
-                st.error("Montant strictement positif requis")
-            else:
-                amt_cents = int(round(amount_eur * 100))
-                base = {"ts": now_iso_utc(), "type": op_type, "note": note}
-                entry = None
-                if op_type == "deposit":
-                    entry = {
-                        **base,
-                        "amount_cents": amt_cents,
-                        "dest_account_id": dest_id,
-                    }
-                elif op_type == "expense":
-                    entry = {
-                        **base,
-                        "amount_cents": amt_cents,
-                        "src_account_id": src_id,
-                    }
-                elif op_type == "transfer":
-                    if src_id == dest_id:
-                        st.error("Comptes source et destinataire différents requis")
-                    else:
-                        entry = {
-                            **base,
-                            "amount_cents": amt_cents,
-                            "src_account_id": src_id,
-                            "dest_account_id": dest_id,
-                        }
-                elif op_type == "adjustment":
-                    # Ajustement autorise les montants signés
-                    entry = {**base, "amount_cents": amt_cents, "account_id": adj_id}
-                if entry is not None:
-                    save_ledger_entry(st.session_state.pseudo, entry)
-                    st.session_state.ledger.append(entry)
-                    st.success("Opération ajoutée")
-                    st.rerun()
-
     # Journal des opérations avec design amélioré
     st.markdown("---")
     st.markdown("""
@@ -2190,10 +2328,11 @@ elif page == "📊 Dashboard":
         st.markdown("---")
 
         # Onglets améliorés avec plus d'analyses
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📈 Évolution & Tendances",
             "🏦 Analyse par Compte", 
             "💰 Répartition & Structure",
+            "💎 Simulations d'Intérêts",
             "🔮 Prédictions & IA",
             "🎯 Insights & Recommandations"
         ])
@@ -2482,6 +2621,204 @@ elif page == "📊 Dashboard":
                 st.info("Aucun compte trouvé")
 
         with tab4:
+            st.markdown("### 💎 Simulations d'Intérêts par Plateforme")
+            
+            # Calculer les simulations pour toutes les plateformes
+            interest_results = calculate_platform_interests(balances_by_type)
+            
+            if not interest_results:
+                st.info("💡 Aucun solde disponible pour les simulations d'intérêts")
+            else:
+                # Vue d'ensemble des gains potentiels
+                st.markdown("#### 🎯 Vue d'ensemble des revenus passifs")
+                
+                total_monthly_1m = 0
+                total_yearly_12m = 0
+                
+                # Calculer les totaux pour l'aperçu
+                for platform_id, data in interest_results.items():
+                    config = data["config"]
+                    simulations = data["simulations"]
+                    
+                    if platform_id == "nexo" and "1m" in simulations:
+                        # Pour Nexo, prendre le meilleur cas (20% NEXO tokens)
+                        best_nexo = simulations["1m"].get("nexo_20pct", simulations["1m"].get("nexo_0pct", {}))
+                        total_monthly_1m += best_nexo.get("monthly_interest", 0)
+                        best_yearly = simulations["12m"].get("nexo_20pct", simulations["12m"].get("nexo_0pct", {}))
+                        total_yearly_12m += best_yearly.get("total_interest", 0)
+                    elif "1m" in simulations:
+                        total_monthly_1m += simulations["1m"].get("monthly_interest", 0)
+                        total_yearly_12m += simulations["12m"].get("total_interest", 0)
+                
+                # Cartes récapitulatives
+                col_overview1, col_overview2, col_overview3 = st.columns(3)
+                
+                with col_overview1:
+                    st.markdown(f"""
+                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                   padding: 1.5rem; border-radius: 10px; color: white; text-align: center;">
+                            <h4 style="margin: 0;">💰 Revenus Mensuels</h4>
+                            <h2 style="margin: 0.5rem 0; font-size: 1.8rem;">+{total_monthly_1m:.2f} €</h2>
+                            <small style="opacity: 0.8;">Estimation mensuelle</small>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                with col_overview2:
+                    st.markdown(f"""
+                        <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                                   padding: 1.5rem; border-radius: 10px; color: white; text-align: center;">
+                            <h4 style="margin: 0;">📅 Revenus Annuels</h4>
+                            <h2 style="margin: 0.5rem 0; font-size: 1.8rem;">+{total_yearly_12m:.2f} €</h2>
+                            <small style="opacity: 0.8;">Projection 12 mois</small>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                with col_overview3:
+                    total_balance = (sum(balances_by_type["linked"].values()) + sum(balances_by_type["unlinked"].values())) / 100
+                    apy_effective = (total_yearly_12m / total_balance * 100) if total_balance > 0 else 0
+                    st.markdown(f"""
+                        <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+                                   padding: 1.5rem; border-radius: 10px; color: white; text-align: center;">
+                            <h4 style="margin: 0;">📊 APY Moyen</h4>
+                            <h2 style="margin: 0.5rem 0; font-size: 1.8rem;">{apy_effective:.1f}%</h2>
+                            <small style="opacity: 0.8;">Rendement effectif</small>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+                st.markdown("---")
+                
+                # Détail par plateforme
+                for platform_id, data in interest_results.items():
+                    config = data["config"]
+                    simulations = data["simulations"]
+                    
+                    if config["balance"] <= 0:
+                        continue
+                        
+                    st.markdown(f"#### {config['name']} - {config['balance']:,.2f} €")
+                    st.caption(config["description"])
+                    
+                    if platform_id == "nexo":
+                        # Section spéciale pour Nexo avec différents niveaux de NEXO tokens
+                        st.markdown("##### 🎛️ Impact des tokens NEXO sur les rendements")
+                        
+                        nexo_comparison_data = []
+                        for months in [1, 6, 12]:
+                            month_sims = simulations.get(f"{months}m", {})
+                            for nexo_level in [0, 10, 15, 20]:
+                                sim_key = f"nexo_{nexo_level}pct"
+                                if sim_key in month_sims:
+                                    sim = month_sims[sim_key]
+                                    nexo_comparison_data.append({
+                                        "Période": f"{months} mois",
+                                        "% NEXO": f"{nexo_level}%",
+                                        "Taux Effectif": f"{sim['effective_rate']:.1f}%",
+                                        "Intérêts": f"+{sim['total_interest']:.2f} €",
+                                        "Bonus NEXO": f"+{sim['nexo_bonus']:.1f}%" if sim['nexo_bonus'] > 0 else "Aucun"
+                                    })
+                        
+                        if nexo_comparison_data:
+                            df_nexo = pd.DataFrame(nexo_comparison_data)
+                            st.dataframe(df_nexo, use_container_width=True, hide_index=True)
+                            
+                        # Graphique comparatif Nexo
+                        if "12m" in simulations:
+                            fig_nexo = go.Figure()
+                            
+                            nexo_levels = [0, 10, 15, 20]
+                            interests_12m = []
+                            effective_rates = []
+                            
+                            for nexo_pct in nexo_levels:
+                                sim_key = f"nexo_{nexo_pct}pct"
+                                if sim_key in simulations["12m"]:
+                                    sim = simulations["12m"][sim_key]
+                                    interests_12m.append(sim["total_interest"])
+                                    effective_rates.append(sim["effective_rate"])
+                                else:
+                                    interests_12m.append(0)
+                                    effective_rates.append(0)
+                            
+                            fig_nexo.add_trace(go.Bar(
+                                x=[f"{pct}% NEXO" for pct in nexo_levels],
+                                y=interests_12m,
+                                name="Intérêts annuels (€)",
+                                marker_color=['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4'],
+                                text=[f"+{val:.0f}€" for val in interests_12m],
+                                textposition='auto',
+                            ))
+                            
+                            fig_nexo.update_layout(
+                                title=f"💎 Impact des tokens NEXO sur {config['balance']:,.0f}€ (12 mois)",
+                                xaxis_title="Niveau de détention NEXO",
+                                yaxis_title="Intérêts générés (€)",
+                                height=400
+                            )
+                            
+                            st.plotly_chart(fig_nexo, use_container_width=True)
+                            
+                        # Recommandation NEXO
+                        best_nexo_sim = simulations.get("12m", {}).get("nexo_20pct", {})
+                        worst_nexo_sim = simulations.get("12m", {}).get("nexo_0pct", {})
+                        
+                        if best_nexo_sim and worst_nexo_sim:
+                            nexo_advantage = best_nexo_sim.get("total_interest", 0) - worst_nexo_sim.get("total_interest", 0)
+                            st.info(f"💡 **Opportunité NEXO:** Détenir 20%+ de tokens NEXO rapporterait **+{nexo_advantage:.2f}€** d'intérêts supplémentaires par an !")
+                    
+                    else:
+                        # Pour les autres plateformes
+                        col_sim1, col_sim2, col_sim3 = st.columns(3)
+                        
+                        periods = [1, 6, 12]
+                        columns = [col_sim1, col_sim2, col_sim3]
+                        
+                        for period, col in zip(periods, columns):
+                            sim_key = f"{period}m"
+                            if sim_key in simulations:
+                                sim = simulations[sim_key]
+                                with col:
+                                    color_gradient = {
+                                        1: "linear-gradient(135deg, #74b9ff 0%, #0984e3 100%)",
+                                        6: "linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%)", 
+                                        12: "linear-gradient(135deg, #fd79a8 0%, #e84393 100%)"
+                                    }[period]
+                                    
+                                    st.markdown(f"""
+                                        <div style="background: {color_gradient}; 
+                                                   padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                                            <h5 style="margin: 0;">{period} mois</h5>
+                                            <h3 style="margin: 0.5rem 0;">+{sim['total_interest']:.2f} €</h3>
+                                            <small>Taux: {sim['effective_rate']:.1f}% APY</small><br>
+                                            <small>Par mois: +{sim['monthly_interest']:.2f}€</small>
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                    
+                    st.markdown("---")
+                
+                # Section de recommandations stratégiques
+                st.markdown("#### 🎯 Recommandations Stratégiques")
+                
+                col_rec1, col_rec2 = st.columns(2)
+                
+                with col_rec1:
+                    st.markdown("""
+                        **🔗 Comptes Linked (Nexo):**
+                        - Considérer l'achat de tokens NEXO pour maximiser les rendements
+                        - 20% du portefeuille en NEXO = +2% de bonus APY
+                        - Capitalisation quotidienne optimisée
+                        - Accès aux taux préférentiels Nexo
+                    """)
+                    
+                with col_rec2:
+                    st.markdown("""
+                        **📎 Comptes Unlinked (Diversification):**
+                        - Numerai: Excellent pour l'exposition NMR
+                        - Bricks: Immobilier tokenisé stable
+                        - Répartition équilibrée pour réduire les risques
+                        - Surveillance des taux de marché
+                    """)
+
+        with tab5:
             st.subheader("🔮 Prédictions et Analyse des Flux")
 
             if show_predictions:
@@ -2623,7 +2960,7 @@ elif page == "📊 Dashboard":
                     "Activez les prédictions dans la sidebar pour voir cette section"
                 )
 
-        with tab5:
+        with tab6:
             st.markdown("#### 🎯 Insights & Recommandations")
             
             # Analyse intelligente basée sur les données
