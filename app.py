@@ -948,6 +948,125 @@ def calculate_platform_interests(balances_by_type: Dict) -> Dict:
     
     return results
 
+def calculate_custom_simulation(
+    initial_capital: float,
+    monthly_addition: float,
+    annual_rate: float,
+    period_months: int,
+    nexo_percentage: float = 0.0,
+    nexo_price: float = 1.0
+) -> Dict:
+    """
+    Simule l'évolution d'un capital avec ajouts mensuels et intérêts composés.
+    
+    Args:
+        initial_capital: Capital de départ en euros
+        monthly_addition: Ajout mensuel en euros
+        annual_rate: Taux annuel en %
+        period_months: Période en mois
+        nexo_percentage: % du portefeuille en NEXO tokens
+        nexo_price: Prix du token NEXO en euros
+    
+    Returns:
+        Dict contenant l'évolution mois par mois
+    """
+    # Calculer le bonus NEXO
+    nexo_bonus = 0
+    if nexo_percentage >= 10:
+        nexo_bonus = min(2.0, (nexo_percentage / 10) * 0.5)
+    
+    effective_rate = annual_rate + nexo_bonus
+    monthly_rate = effective_rate / 100 / 12  # Taux mensuel
+    
+    evolution = []
+    current_capital = initial_capital
+    total_added = 0
+    total_interest = 0
+    
+    # Calculs NEXO
+    nexo_tokens_needed = 0
+    nexo_value_eur = 0
+    
+    for month in range(period_months + 1):
+        # Calcul des tokens NEXO nécessaires pour maintenir le %
+        if nexo_percentage > 0:
+            nexo_value_eur = current_capital * (nexo_percentage / 100)
+            nexo_tokens_needed = nexo_value_eur / nexo_price if nexo_price > 0 else 0
+        
+        # Ajouter l'évolution de ce mois
+        evolution.append({
+            "month": month,
+            "capital": current_capital,
+            "total_added": total_added,
+            "total_interest": total_interest,
+            "monthly_interest": current_capital * monthly_rate if month > 0 else 0,
+            "nexo_tokens_needed": nexo_tokens_needed,
+            "nexo_value_eur": nexo_value_eur,
+            "effective_rate": effective_rate
+        })
+        
+        # Calculs pour le mois suivant (sauf pour le dernier mois)
+        if month < period_months:
+            # Ajouter les intérêts mensuels
+            monthly_interest = current_capital * monthly_rate
+            total_interest += monthly_interest
+            current_capital += monthly_interest
+            
+            # Ajouter l'apport mensuel
+            current_capital += monthly_addition
+            total_added += monthly_addition
+    
+    return {
+        "evolution": evolution,
+        "summary": {
+            "initial_capital": initial_capital,
+            "final_capital": current_capital,
+            "total_added": total_added,
+            "total_interest": total_interest,
+            "effective_rate": effective_rate,
+            "nexo_bonus": nexo_bonus,
+            "final_nexo_tokens": nexo_tokens_needed,
+            "final_nexo_value": nexo_value_eur
+        }
+    }
+
+def calculate_nexo_requirements(
+    linked_balance: float, 
+    target_percentage: float, 
+    nexo_price: float
+) -> Dict:
+    """
+    Calcule les besoins en tokens NEXO pour atteindre un pourcentage cible.
+    
+    Args:
+        linked_balance: Solde total des comptes linked en euros
+        target_percentage: Pourcentage cible de NEXO (10, 15, 20...)
+        nexo_price: Prix actuel du token NEXO en euros
+    
+    Returns:
+        Dict avec les calculs NEXO
+    """
+    if nexo_price <= 0:
+        return {"error": "Prix NEXO invalide"}
+    
+    target_nexo_value = linked_balance * (target_percentage / 100)
+    tokens_needed = target_nexo_value / nexo_price
+    
+    # Calculer le bonus obtenu
+    bonus = 0
+    if target_percentage >= 10:
+        bonus = min(2.0, (target_percentage / 10) * 0.5)
+    
+    return {
+        "linked_balance": linked_balance,
+        "target_percentage": target_percentage,
+        "target_nexo_value_eur": target_nexo_value,
+        "tokens_needed": tokens_needed,
+        "nexo_price": nexo_price,
+        "bonus_rate": bonus,
+        "investment_cost": target_nexo_value
+    }
+
 
 if "rules" not in st.session_state:
     st.session_state.rules = []
@@ -1333,7 +1452,7 @@ elif page == "Ledger":
                     st.session_state.ledger.append(entry)
                     st.success("Opération ajoutée")
                     st.rerun()
-                    
+
         if st.session_state.rules:
             st.markdown("---")
             st.markdown("""
@@ -1529,9 +1648,6 @@ elif page == "Ledger":
         acc_id_to_name = {
             acc["account_id"]: acc["name"] for acc in st.session_state.accounts
         }
-        
-        # Afficher les dernières opérations sous forme de cartes
-        st.markdown("##### 🕒 Dernières opérations")
         
         # Limiter l'affichage aux 10 dernières opérations pour éviter la surcharge
         recent_ops = list(reversed(st.session_state.ledger))[:10]
@@ -2621,202 +2737,339 @@ elif page == "📊 Dashboard":
                 st.info("Aucun compte trouvé")
 
         with tab4:
-            st.markdown("### 💎 Simulations d'Intérêts par Plateforme")
+            st.markdown("### 💎 Simulateur d'Intérêts Interactif")
             
-            # Calculer les simulations pour toutes les plateformes
-            interest_results = calculate_platform_interests(balances_by_type)
+            # Paramètres de simulation dans la sidebar
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("### 🎛️ Paramètres de Simulation")
             
-            if not interest_results:
-                st.info("💡 Aucun solde disponible pour les simulations d'intérêts")
-            else:
-                # Vue d'ensemble des gains potentiels
-                st.markdown("#### 🎯 Vue d'ensemble des revenus passifs")
+            # Onglets pour différents types de simulation
+            sim_tab1, sim_tab2 = st.tabs(["📊 Simulation Personnalisée", "💎 Calculateur NEXO"])
+            
+            with sim_tab1:
+                st.markdown("#### � Simulez votre croissance financière")
                 
-                total_monthly_1m = 0
-                total_yearly_12m = 0
+                # Paramètres de simulation
+                col_params1, col_params2 = st.columns(2)
                 
-                # Calculer les totaux pour l'aperçu
-                for platform_id, data in interest_results.items():
-                    config = data["config"]
-                    simulations = data["simulations"]
+                with col_params1:
+                    st.markdown("##### 💰 Capital et Apports")
+                    initial_capital = st.number_input(
+                        "Capital initial (€)", 
+                        min_value=0.0, 
+                        value=float(sum(balances_by_type["linked"].values()) / 100),
+                        step=100.0,
+                        help="Montant de départ pour la simulation"
+                    )
                     
-                    if platform_id == "nexo" and "1m" in simulations:
-                        # Pour Nexo, prendre le meilleur cas (20% NEXO tokens)
-                        best_nexo = simulations["1m"].get("nexo_20pct", simulations["1m"].get("nexo_0pct", {}))
-                        total_monthly_1m += best_nexo.get("monthly_interest", 0)
-                        best_yearly = simulations["12m"].get("nexo_20pct", simulations["12m"].get("nexo_0pct", {}))
-                        total_yearly_12m += best_yearly.get("total_interest", 0)
-                    elif "1m" in simulations:
-                        total_monthly_1m += simulations["1m"].get("monthly_interest", 0)
-                        total_yearly_12m += simulations["12m"].get("total_interest", 0)
-                
-                # Cartes récapitulatives
-                col_overview1, col_overview2, col_overview3 = st.columns(3)
-                
-                with col_overview1:
-                    st.markdown(f"""
-                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                   padding: 1.5rem; border-radius: 10px; color: white; text-align: center;">
-                            <h4 style="margin: 0;">💰 Revenus Mensuels</h4>
-                            <h2 style="margin: 0.5rem 0; font-size: 1.8rem;">+{total_monthly_1m:.2f} €</h2>
-                            <small style="opacity: 0.8;">Estimation mensuelle</small>
-                        </div>
-                    """, unsafe_allow_html=True)
-                
-                with col_overview2:
-                    st.markdown(f"""
-                        <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
-                                   padding: 1.5rem; border-radius: 10px; color: white; text-align: center;">
-                            <h4 style="margin: 0;">📅 Revenus Annuels</h4>
-                            <h2 style="margin: 0.5rem 0; font-size: 1.8rem;">+{total_yearly_12m:.2f} €</h2>
-                            <small style="opacity: 0.8;">Projection 12 mois</small>
-                        </div>
-                    """, unsafe_allow_html=True)
-                
-                with col_overview3:
-                    total_balance = (sum(balances_by_type["linked"].values()) + sum(balances_by_type["unlinked"].values())) / 100
-                    apy_effective = (total_yearly_12m / total_balance * 100) if total_balance > 0 else 0
-                    st.markdown(f"""
-                        <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
-                                   padding: 1.5rem; border-radius: 10px; color: white; text-align: center;">
-                            <h4 style="margin: 0;">📊 APY Moyen</h4>
-                            <h2 style="margin: 0.5rem 0; font-size: 1.8rem;">{apy_effective:.1f}%</h2>
-                            <small style="opacity: 0.8;">Rendement effectif</small>
-                        </div>
-                    """, unsafe_allow_html=True)
-
-                st.markdown("---")
-                
-                # Détail par plateforme
-                for platform_id, data in interest_results.items():
-                    config = data["config"]
-                    simulations = data["simulations"]
+                    monthly_addition = st.number_input(
+                        "Apport mensuel (€)", 
+                        min_value=0.0, 
+                        value=500.0,
+                        step=50.0,
+                        help="Montant ajouté chaque mois"
+                    )
                     
-                    if config["balance"] <= 0:
-                        continue
-                        
-                    st.markdown(f"#### {config['name']} - {config['balance']:,.2f} €")
-                    st.caption(config["description"])
+                    period_months = st.slider(
+                        "Période de simulation (mois)", 
+                        min_value=1, 
+                        max_value=120, 
+                        value=24,
+                        help="Durée de la simulation en mois"
+                    )
+                
+                with col_params2:
+                    st.markdown("##### 📈 Rendements")
+                    annual_rate = st.number_input(
+                        "Taux annuel (%)", 
+                        min_value=0.0, 
+                        max_value=50.0, 
+                        value=8.5,
+                        step=0.1,
+                        help="Taux d'intérêt annuel en pourcentage"
+                    )
                     
-                    if platform_id == "nexo":
-                        # Section spéciale pour Nexo avec différents niveaux de NEXO tokens
-                        st.markdown("##### 🎛️ Impact des tokens NEXO sur les rendements")
-                        
-                        nexo_comparison_data = []
-                        for months in [1, 6, 12]:
-                            month_sims = simulations.get(f"{months}m", {})
-                            for nexo_level in [0, 10, 15, 20]:
-                                sim_key = f"nexo_{nexo_level}pct"
-                                if sim_key in month_sims:
-                                    sim = month_sims[sim_key]
-                                    nexo_comparison_data.append({
-                                        "Période": f"{months} mois",
-                                        "% NEXO": f"{nexo_level}%",
-                                        "Taux Effectif": f"{sim['effective_rate']:.1f}%",
-                                        "Intérêts": f"+{sim['total_interest']:.2f} €",
-                                        "Bonus NEXO": f"+{sim['nexo_bonus']:.1f}%" if sim['nexo_bonus'] > 0 else "Aucun"
-                                    })
-                        
-                        if nexo_comparison_data:
-                            df_nexo = pd.DataFrame(nexo_comparison_data)
-                            st.dataframe(df_nexo, use_container_width=True, hide_index=True)
-                            
-                        # Graphique comparatif Nexo
-                        if "12m" in simulations:
-                            fig_nexo = go.Figure()
-                            
-                            nexo_levels = [0, 10, 15, 20]
-                            interests_12m = []
-                            effective_rates = []
-                            
-                            for nexo_pct in nexo_levels:
-                                sim_key = f"nexo_{nexo_pct}pct"
-                                if sim_key in simulations["12m"]:
-                                    sim = simulations["12m"][sim_key]
-                                    interests_12m.append(sim["total_interest"])
-                                    effective_rates.append(sim["effective_rate"])
-                                else:
-                                    interests_12m.append(0)
-                                    effective_rates.append(0)
-                            
-                            fig_nexo.add_trace(go.Bar(
-                                x=[f"{pct}% NEXO" for pct in nexo_levels],
-                                y=interests_12m,
-                                name="Intérêts annuels (€)",
-                                marker_color=['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4'],
-                                text=[f"+{val:.0f}€" for val in interests_12m],
-                                textposition='auto',
-                            ))
-                            
-                            fig_nexo.update_layout(
-                                title=f"💎 Impact des tokens NEXO sur {config['balance']:,.0f}€ (12 mois)",
-                                xaxis_title="Niveau de détention NEXO",
-                                yaxis_title="Intérêts générés (€)",
-                                height=400
-                            )
-                            
-                            st.plotly_chart(fig_nexo, use_container_width=True)
-                            
-                        # Recommandation NEXO
-                        best_nexo_sim = simulations.get("12m", {}).get("nexo_20pct", {})
-                        worst_nexo_sim = simulations.get("12m", {}).get("nexo_0pct", {})
-                        
-                        if best_nexo_sim and worst_nexo_sim:
-                            nexo_advantage = best_nexo_sim.get("total_interest", 0) - worst_nexo_sim.get("total_interest", 0)
-                            st.info(f"💡 **Opportunité NEXO:** Détenir 20%+ de tokens NEXO rapporterait **+{nexo_advantage:.2f}€** d'intérêts supplémentaires par an !")
+                    nexo_percentage = st.slider(
+                        "% Portfolio en NEXO tokens", 
+                        min_value=0, 
+                        max_value=30, 
+                        value=15,
+                        help="Pourcentage du portefeuille en tokens NEXO pour les bonus"
+                    )
                     
-                    else:
-                        # Pour les autres plateformes
-                        col_sim1, col_sim2, col_sim3 = st.columns(3)
-                        
-                        periods = [1, 6, 12]
-                        columns = [col_sim1, col_sim2, col_sim3]
-                        
-                        for period, col in zip(periods, columns):
-                            sim_key = f"{period}m"
-                            if sim_key in simulations:
-                                sim = simulations[sim_key]
-                                with col:
-                                    color_gradient = {
-                                        1: "linear-gradient(135deg, #74b9ff 0%, #0984e3 100%)",
-                                        6: "linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%)", 
-                                        12: "linear-gradient(135deg, #fd79a8 0%, #e84393 100%)"
-                                    }[period]
-                                    
-                                    st.markdown(f"""
-                                        <div style="background: {color_gradient}; 
-                                                   padding: 1rem; border-radius: 8px; color: white; text-align: center;">
-                                            <h5 style="margin: 0;">{period} mois</h5>
-                                            <h3 style="margin: 0.5rem 0;">+{sim['total_interest']:.2f} €</h3>
-                                            <small>Taux: {sim['effective_rate']:.1f}% APY</small><br>
-                                            <small>Par mois: +{sim['monthly_interest']:.2f}€</small>
-                                        </div>
-                                    """, unsafe_allow_html=True)
+                    nexo_price = st.number_input(
+                        "Prix NEXO (€/token)", 
+                        min_value=0.1, 
+                        value=1.2,
+                        step=0.01,
+                        help="Prix actuel du token NEXO"
+                    )
+                
+                # Calculer la simulation
+                if st.button("🚀 Lancer la Simulation", type="primary", key="run_simulation"):
+                    simulation_result = calculate_custom_simulation(
+                        initial_capital, 
+                        monthly_addition, 
+                        annual_rate, 
+                        period_months, 
+                        nexo_percentage, 
+                        nexo_price
+                    )
+                    
+                    # Stocker les résultats dans la session
+                    st.session_state.simulation_result = simulation_result
+                
+                # Afficher les résultats si disponibles
+                if hasattr(st.session_state, 'simulation_result') and st.session_state.simulation_result:
+                    result = st.session_state.simulation_result
+                    summary = result["summary"]
                     
                     st.markdown("---")
-                
-                # Section de recommandations stratégiques
-                st.markdown("#### 🎯 Recommandations Stratégiques")
-                
-                col_rec1, col_rec2 = st.columns(2)
-                
-                with col_rec1:
-                    st.markdown("""
-                        **🔗 Comptes Linked (Nexo):**
-                        - Considérer l'achat de tokens NEXO pour maximiser les rendements
-                        - 20% du portefeuille en NEXO = +2% de bonus APY
-                        - Capitalisation quotidienne optimisée
-                        - Accès aux taux préférentiels Nexo
-                    """)
+                    st.markdown("#### 📊 Résultats de la Simulation")
                     
-                with col_rec2:
-                    st.markdown("""
-                        **📎 Comptes Unlinked (Diversification):**
-                        - Numerai: Excellent pour l'exposition NMR
-                        - Bricks: Immobilier tokenisé stable
-                        - Répartition équilibrée pour réduire les risques
-                        - Surveillance des taux de marché
-                    """)
+                    # Cartes résumé
+                    col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+                    
+                    with col_r1:
+                        st.markdown(f"""
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                       padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                                <h5 style="margin: 0;">💰 Capital Final</h5>
+                                <h3 style="margin: 0.5rem 0;">{summary['final_capital']:,.2f} €</h3>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col_r2:
+                        st.markdown(f"""
+                            <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                                       padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                                <h5 style="margin: 0;">� Gains Totaux</h5>
+                                <h3 style="margin: 0.5rem 0;">+{summary['total_interest']:,.2f} €</h3>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col_r3:
+                        st.markdown(f"""
+                            <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+                                       padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                                <h5 style="margin: 0;">📊 Taux Effectif</h5>
+                                <h3 style="margin: 0.5rem 0;">{summary['effective_rate']:.1f}%</h3>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col_r4:
+                        st.markdown(f"""
+                            <div style="background: linear-gradient(135deg, #00b894 0%, #00a085 100%); 
+                                       padding: 1rem; border-radius: 8px; color: white; text-align: center;">
+                                <h5 style="margin: 0;">� Tokens NEXO</h5>
+                                <h3 style="margin: 0.5rem 0;">{summary['final_nexo_tokens']:,.0f}</h3>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Graphique d'évolution
+                    evolution_df = pd.DataFrame(result["evolution"])
+                    
+                    fig_evolution = go.Figure()
+                    
+                    # Capital total
+                    fig_evolution.add_trace(go.Scatter(
+                        x=evolution_df["month"],
+                        y=evolution_df["capital"],
+                        mode='lines+markers',
+                        name='Capital Total',
+                        line=dict(color='#667eea', width=3),
+                        fill='tonexty'
+                    ))
+                    
+                    # Capital investi (sans intérêts)
+                    capital_invested = evolution_df["month"] * monthly_addition + initial_capital
+                    fig_evolution.add_trace(go.Scatter(
+                        x=evolution_df["month"],
+                        y=capital_invested,
+                        mode='lines',
+                        name='Capital Investi',
+                        line=dict(color='#ff6b6b', width=2, dash='dash')
+                    ))
+                    
+                    fig_evolution.update_layout(
+                        title=f"📈 Évolution du capital sur {period_months} mois",
+                        xaxis_title="Mois",
+                        yaxis_title="Capital (€)",
+                        height=500,
+                        hovermode='x unified'
+                    )
+                    
+                    st.plotly_chart(fig_evolution, use_container_width=True)
+                    
+                    # Tableau détaillé (les 12 derniers mois)
+                    if len(evolution_df) > 12:
+                        st.markdown("##### 📋 Évolution des 12 derniers mois")
+                        display_df = evolution_df.tail(13)  # 12 + le mois initial
+                    else:
+                        st.markdown("##### 📋 Évolution détaillée")
+                        display_df = evolution_df
+                    
+                    # Formatter le dataframe pour l'affichage
+                    formatted_df = display_df.copy()
+                    formatted_df["Capital (€)"] = formatted_df["capital"].apply(lambda x: f"{x:,.2f}")
+                    formatted_df["Intérêts Mensuels (€)"] = formatted_df["monthly_interest"].apply(lambda x: f"+{x:,.2f}")
+                    formatted_df["Tokens NEXO"] = formatted_df["nexo_tokens_needed"].apply(lambda x: f"{x:,.0f}")
+                    formatted_df = formatted_df[["month", "Capital (€)", "Intérêts Mensuels (€)", "Tokens NEXO"]].rename(columns={"month": "Mois"})
+                    
+                    st.dataframe(formatted_df, use_container_width=True, hide_index=True)
+
+            with sim_tab2:
+                st.markdown("#### 💎 Calculateur de Tokens NEXO")
+                st.caption("Calculez combien de tokens NEXO vous devez détenir pour obtenir les bonus de taux")
+                
+                # Paramètres du calculateur NEXO
+                col_nexo1, col_nexo2 = st.columns(2)
+                
+                with col_nexo1:
+                    st.markdown("##### 💰 Vos Comptes Linked")
+                    current_linked = sum(balances_by_type["linked"].values()) / 100
+                    
+                    custom_linked = st.number_input(
+                        "Solde comptes linked (€)", 
+                        min_value=0.0, 
+                        value=current_linked,
+                        step=100.0,
+                        help="Total des comptes linked sur Nexo"
+                    )
+                    
+                    current_nexo_price = st.number_input(
+                        "Prix NEXO actuel (€)", 
+                        min_value=0.01, 
+                        value=1.2,
+                        step=0.01,
+                        help="Prix actuel du token NEXO"
+                    )
+                
+                with col_nexo2:
+                    st.markdown("##### 🎯 Objectifs NEXO")
+                    target_percentages = st.multiselect(
+                        "Niveaux cibles (%)",
+                        [10, 12, 15, 18, 20, 25],
+                        default=[10, 15, 20],
+                        help="Pourcentages de NEXO tokens à calculer"
+                    )
+                
+                if custom_linked > 0 and current_nexo_price > 0 and target_percentages:
+                    st.markdown("---")
+                    st.markdown("#### 📊 Analyse des Besoins NEXO")
+                    
+                    # Calculer pour chaque pourcentage cible
+                    nexo_calculations = []
+                    
+                    for target_pct in sorted(target_percentages):
+                        calc = calculate_nexo_requirements(custom_linked, target_pct, current_nexo_price)
+                        if "error" not in calc:
+                            nexo_calculations.append({
+                                "% Cible": f"{target_pct}%",
+                                "Tokens NEXO": f"{calc['tokens_needed']:,.0f}",
+                                "Valeur (€)": f"{calc['target_nexo_value_eur']:,.2f}",
+                                "Bonus APY": f"+{calc['bonus_rate']:.1f}%",
+                                "Coût": f"{calc['investment_cost']:,.2f} €"
+                            })
+                    
+                    if nexo_calculations:
+                        # Tableau des besoins
+                        df_nexo_calc = pd.DataFrame(nexo_calculations)
+                        st.dataframe(df_nexo_calc, use_container_width=True, hide_index=True)
+                        
+                        # Graphique comparatif
+                        fig_nexo_req = go.Figure()
+                        
+                        percentages = [int(calc["% Cible"].rstrip('%')) for calc in nexo_calculations]
+                        tokens_needed = [float(calc["Tokens NEXO"].replace(',', '')) for calc in nexo_calculations]
+                        costs = [float(calc["Coût"].replace(',', '').replace(' €', '')) for calc in nexo_calculations]
+                        
+                        # Barres pour les tokens
+                        fig_nexo_req.add_trace(go.Bar(
+                            x=[f"{p}%" for p in percentages],
+                            y=tokens_needed,
+                            name="Tokens NEXO nécessaires",
+                            marker_color='#667eea',
+                            text=[f"{t:,.0f}" for t in tokens_needed],
+                            textposition='auto',
+                            yaxis='y'
+                        ))
+                        
+                        # Ligne pour les coûts
+                        fig_nexo_req.add_trace(go.Scatter(
+                            x=[f"{p}%" for p in percentages],
+                            y=costs,
+                            mode='lines+markers',
+                            name="Coût d'investissement (€)",
+                            line=dict(color='#f093fb', width=3),
+                            marker=dict(size=8),
+                            yaxis='y2'
+                        ))
+                        
+                        fig_nexo_req.update_layout(
+                            title=f"💎 Besoins en Tokens NEXO pour {custom_linked:,.0f}€",
+                            xaxis_title="Pourcentage NEXO cible",
+                            yaxis=dict(title="Nombre de tokens", side='left'),
+                            yaxis2=dict(title="Coût (€)", side='right', overlaying='y'),
+                            height=400,
+                            showlegend=True
+                        )
+                        
+                        st.plotly_chart(fig_nexo_req, use_container_width=True)
+                        
+                        # Recommandations automatiques
+                        st.markdown("#### 💡 Recommandations")
+                        
+                        # Trouver le meilleur rapport qualité/prix
+                        best_value_idx = 0
+                        if len(nexo_calculations) > 1:
+                            # Privilégier 15% comme bon compromis
+                            for i, calc in enumerate(nexo_calculations):
+                                if calc["% Cible"] == "15%":
+                                    best_value_idx = i
+                                    break
+                        
+                        best_calc = nexo_calculations[best_value_idx] if nexo_calculations else None
+                        
+                        if best_calc:
+                            col_rec1, col_rec2 = st.columns(2)
+                            
+                            with col_rec1:
+                                st.success(f"""
+                                **🎯 Recommandation Optimale: {best_calc['% Cible']}**
+                                
+                                - 🪙 Tokens nécessaires: **{best_calc['Tokens NEXO']}**
+                                - 💰 Investissement: **{best_calc['Coût']}**
+                                - 📈 Bonus obtenu: **{best_calc['Bonus APY']}**
+                                - 🎁 Excellent rapport rendement/risque
+                                """)
+                            
+                            with col_rec2:
+                                # Calcul du ROI annuel du bonus
+                                bonus_rate = float(best_calc['Bonus APY'].replace('+', '').replace('%', ''))
+                                annual_bonus = custom_linked * (bonus_rate / 100)
+                                investment_cost = float(best_calc['Coût'].replace(',', '').replace(' €', ''))
+                                
+                                st.info(f"""
+                                **📊 Analyse du Retour sur Investissement**
+                                
+                                - 💵 Bonus annuel: **+{annual_bonus:.2f}€**
+                                - 🔄 ROI du bonus: **{(annual_bonus/investment_cost*100):.1f}%**
+                                - ⏱️ Amortissement: **{(investment_cost/annual_bonus):.1f} ans**
+                                - ✨ + Potentiel d'appréciation du token NEXO
+                                """)
+                        
+                        # Zone d'alerte pour les gros investissements
+                        max_cost = max(costs) if costs else 0
+                        if max_cost > custom_linked * 0.3:  # Plus de 30% du portefeuille
+                            st.warning(f"""
+                            ⚠️ **Attention:** Les niveaux élevés de NEXO (20%+) nécessitent un investissement important 
+                            ({max_cost:,.0f}€ pour 20%). Considérez une approche progressive :
+                            
+                            1. Commencer par 10-15% de NEXO
+                            2. Réinvestir les gains en tokens NEXO
+                            3. Augmenter progressivement selon les performances
+                            """)
 
         with tab5:
             st.subheader("🔮 Prédictions et Analyse des Flux")
