@@ -934,7 +934,7 @@ if not st.session_state.pseudo:
         "Saisissez un pseudo dans la barre latérale puis cliquez 'Charger cet utilisateur'."
     )
 elif page == "Ledger":
-    col_left, col_right = st.columns([1, 1])
+    col_left, col_right = st.columns([2, 1])
 
     with col_left:
         st.subheader("Comptes et soldes")
@@ -1846,117 +1846,328 @@ elif page == "Règles":
                         st.rerun()
 
 elif page == "📊 Dashboard":
-    st.header("📊 Dashboard & Analyses Avancées")
+    # En-tête moderne avec gradient visuel
+    st.markdown(
+        """
+        <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); 
+                    padding: 1.5rem; border-radius: 10px; margin-bottom: 2rem;">
+            <h1 style="color: white; margin: 0; text-align: center;">
+                📊 Dashboard Financier
+            </h1>
+            <p style="color: #E8E8E8; margin: 0.5rem 0 0 0; text-align: center; font-size: 1.1rem;">
+                Analyses avancées et visualisations de vos finances
+            </p>
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
 
     if not st.session_state.pseudo:
-        st.warning("Sélectionnez un utilisateur pour voir le dashboard.")
+        st.warning("🔐 Sélectionnez un utilisateur pour accéder au dashboard.")
     elif not st.session_state.ledger:
         st.info(
-            "Aucune donnée disponible. Ajoutez des opérations pour voir les analyses."
+            "📭 Aucune donnée disponible. Ajoutez des opérations pour voir les analyses."
         )
     else:
-        # Sidebar avec filtres
-        st.sidebar.header("🔧 Filtres & Options")
-
-        # Créer un dictionnaire des comptes pour faciliter l'utilisation
-        accounts_dict = {acc["account_id"]: acc for acc in st.session_state.accounts}
-
-        # Filtre par comptes
-        account_options = ["Tous les comptes"] + [
-            f"{acc['name']} ({acc['account_id']})" for acc in st.session_state.accounts
-        ]
-        selected_accounts_display = st.sidebar.multiselect(
-            "Comptes à analyser", account_options, default=["Tous les comptes"]
+        # Sidebar avec filtres améliorés
+        st.sidebar.markdown(
+            """
+            <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                <h3 style="margin: 0; color: #495057;">🔧 Configuration</h3>
+            </div>
+        """,
+            unsafe_allow_html=True,
         )
 
-        # Convertir la sélection en IDs de comptes
-        if "Tous les comptes" in selected_accounts_display:
-            selected_account_ids = list(accounts_dict.keys())
+        # Séparation des comptes linked/unlinked
+        linked_accounts = get_linked_accounts()
+        unlinked_accounts = get_unlinked_accounts()
+
+        # Options d'analyse par type de compte
+        st.sidebar.subheader("📊 Scope d'analyse")
+        analysis_scope = st.sidebar.radio(
+            "Comptes à inclure",
+            ["🔗 Linked uniquement", "📎 Unlinked uniquement", "💰 Tous les comptes"],
+            index=0,
+        )
+
+        # Sélection des comptes selon le scope
+        if analysis_scope == "🔗 Linked uniquement":
+            available_accounts = linked_accounts
+        elif analysis_scope == "📎 Unlinked uniquement":
+            available_accounts = unlinked_accounts
         else:
-            selected_account_ids = []
-            for selection in selected_accounts_display:
-                if selection != "Tous les comptes":
-                    # Extraire l'ID du compte depuis "(ID)"
-                    acc_id = selection.split("(")[-1].strip(")")
-                    selected_account_ids.append(acc_id)
+            available_accounts = st.session_state.accounts
 
-        # Période d'analyse
-        period_days = st.sidebar.selectbox(
-            "Période d'analyse",
-            [7, 15, 30, 60, 90, 180],
-            index=2,  # 30 jours par défaut
+        account_options = ["Tous"] + [acc["name"] for acc in available_accounts]
+        selected_accounts = st.sidebar.multiselect(
+            "Comptes spécifiques", account_options, default=["Tous"]
         )
 
-        # Options de prédiction
-        st.sidebar.subheader("🔮 Prédictions")
-        enable_predictions = st.sidebar.checkbox("Activer les prédictions", value=True)
+        # Convertir la sélection
+        if "Tous" in selected_accounts:
+            selected_account_ids = [acc["account_id"] for acc in available_accounts]
+        else:
+            selected_account_ids = [
+                acc["account_id"]
+                for acc in available_accounts
+                if acc["name"] in selected_accounts
+            ]
+
+        # Période d'analyse avec plus d'options
+        st.sidebar.subheader("📅 Période")
+        period_days = st.sidebar.selectbox(
+            "Durée d'analyse",
+            [7, 15, 30, 60, 90, 180, 365],
+            index=2,
+            format_func=lambda x: f"{x} jours" + (" (1 an)" if x == 365 else ""),
+        )
+
+        # Options avancées
+        st.sidebar.subheader("⚙️ Options avancées")
+        show_trends = st.sidebar.checkbox("Afficher les tendances", value=True)
+        show_predictions = st.sidebar.checkbox("Activer les prédictions", value=True)
         prediction_days = (
-            st.sidebar.slider("Horizon de prédiction (jours)", 7, 90, 30)
-            if enable_predictions
+            st.sidebar.slider("Horizon prédiction (j)", 7, 90, 30)
+            if show_predictions
             else 0
         )
 
-        # Calcul des KPIs
-        kpis = calculate_kpis(st.session_state.ledger, st.session_state.accounts)
+        # Paramètres visuels
+        chart_theme = st.sidebar.selectbox(
+            "Thème des graphiques", ["Moderne", "Classique", "Sombre"], index=0
+        )
 
-        # Section KPIs en haut
-        st.subheader("📈 Indicateurs Clés")
+        # Calculer les KPIs selon le scope d'analyse
+        if analysis_scope == "🔗 Linked uniquement":
+            analysis_accounts = linked_accounts
+        elif analysis_scope == "📎 Unlinked uniquement":
+            analysis_accounts = unlinked_accounts
+        else:
+            analysis_accounts = st.session_state.accounts
+            
+        kpis = calculate_kpis(st.session_state.ledger, analysis_accounts)
+        balances_by_type = compute_balances_by_type()
+
+        # KPIs modernes avec cartes colorées
+        st.markdown("### 💎 Vue d'ensemble financière")
+        
+        # Première ligne - Soldes
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            linked_total = sum(balances_by_type["linked"].values()) / 100
+            st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                           padding: 1.5rem; border-radius: 10px; color: white;">
+                    <h3 style="margin: 0; font-size: 1.1rem;">🔗 Comptes Linked</h3>
+                    <h1 style="margin: 0.5rem 0; font-size: 2rem;">{linked_total:,.2f} €</h1>
+                    <p style="margin: 0; opacity: 0.8;">Comptes opérationnels</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+        with col2:
+            unlinked_total = sum(balances_by_type["unlinked"].values()) / 100
+            st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                           padding: 1.5rem; border-radius: 10px; color: white;">
+                    <h3 style="margin: 0; font-size: 1.1rem;">📎 Comptes Unlinked</h3>
+                    <h1 style="margin: 0.5rem 0; font-size: 2rem;">{unlinked_total:,.2f} €</h1>
+                    <p style="margin: 0; opacity: 0.8;">Épargnes & placements</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+        with col3:
+            total_patrimoine = linked_total + unlinked_total
+            st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+                           padding: 1.5rem; border-radius: 10px; color: white;">
+                    <h3 style="margin: 0; font-size: 1.1rem;">� Patrimoine Total</h3>
+                    <h1 style="margin: 0.5rem 0; font-size: 2rem;">{total_patrimoine:,.2f} €</h1>
+                    <p style="margin: 0; opacity: 0.8;">Valeur totale</p>
+                </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # Deuxième ligne - Métriques de performance
+        st.markdown("### 📊 Métriques de performance")
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             st.metric(
-                label="💰 Solde Actuel",
-                value=f"{kpis.get('solde_actuel', 0):.2f} €",
-                delta=f"{kpis.get('tendance_7j', 0):+.2f} € (7j)",
+                label="� Tendance 7j",
+                value=f"{kpis.get('tendance_7j', 0):+.2f} €",
+                delta=f"{(kpis.get('tendance_7j', 0)/7):.2f} €/j" if kpis.get('tendance_7j', 0) != 0 else "Stable"
             )
 
         with col2:
-            st.metric(label="📊 Moyenne 7j", value=f"{kpis.get('moyenne_7j', 0):.2f} €")
+            st.metric(
+                label="� Dépenses moy/j",
+                value=f"{kpis.get('depense_moy_jour', 0):.2f} €",
+                delta=f"{kpis.get('depenses_30j', 0):.0f} € sur 30j"
+            )
 
         with col3:
             st.metric(
-                label="📅 Moyenne 30j", value=f"{kpis.get('moyenne_30j', 0):.2f} €"
+                label="� Recettes 30j", 
+                value=f"{kpis.get('recettes_30j', 0):.2f} €",
+                delta=f"{(kpis.get('recettes_30j', 0) - kpis.get('depenses_30j', 0)):+.2f} € net"
             )
 
         with col4:
+            volatility = abs(kpis.get('tendance_7j', 0)) / 7 if kpis.get('tendance_7j', 0) != 0 else 0
             st.metric(
-                label="💸 Dépense/jour",
-                value=f"{kpis.get('depense_moy_jour', 0):.2f} €",
+                label="� Volatilité",
+                value=f"{volatility:.2f} €/j",
+                delta="Stable" if volatility < 10 else "Variable"
             )
 
         st.markdown("---")
 
-        # Onglets pour organiser les différentes vues
-        tab1, tab2, tab3, tab4 = st.tabs(
-            [
-                "📈 Évolution Globale",
-                "📊 Par Compte",
-                "💰 Répartition",
-                "🔮 Prédictions",
-            ]
-        )
+        # Onglets améliorés avec plus d'analyses
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📈 Évolution & Tendances",
+            "🏦 Analyse par Compte", 
+            "💰 Répartition & Structure",
+            "🔮 Prédictions & IA",
+            "🎯 Insights & Recommandations"
+        ])
 
         with tab1:
-            st.subheader("📈 Évolution du Solde Total")
+            st.markdown("#### 📈 Évolution Temporelle")
+            
+            # Sélection du type d'analyse
+            col_type, col_period = st.columns([2, 1])
+            with col_type:
+                view_type = st.selectbox(
+                    "Type de vue",
+                    ["Solde Global", "Linked vs Unlinked", "Flux Quotidiens", "Comparaison Périodes"]
+                )
+            with col_period:
+                smoothing = st.selectbox("Lissage", ["Aucun", "Moyenne Mobile 7j", "Tendance"])
 
-            # Récupération des données d'évolution
-            balance_evolution = get_balance_evolution(
-                st.session_state.ledger, st.session_state.accounts, period_days
-            )
+            # Récupération des données selon le scope
+            if analysis_scope == "🔗 Linked uniquement":
+                balance_evolution = get_balance_evolution(st.session_state.ledger, linked_accounts, period_days)
+            elif analysis_scope == "📎 Unlinked uniquement":
+                balance_evolution = get_balance_evolution(st.session_state.ledger, unlinked_accounts, period_days)
+            else:
+                balance_evolution = get_balance_evolution(st.session_state.ledger, st.session_state.accounts, period_days)
 
             if not balance_evolution.empty:
-                # Graphique principal de l'évolution
-                fig_balance = px.line(
-                    balance_evolution,
-                    x="date",
-                    y="total_euros",
-                    title=f"Évolution du solde total sur {period_days} jours",
-                    labels={"total_euros": "Solde (€)", "date": "Date"},
-                )
-                fig_balance.update_layout(
-                    xaxis_title="Date", yaxis_title="Solde (€)", hovermode="x unified"
-                )
-                st.plotly_chart(fig_balance, width="stretch")
+                # Configuration du thème selon la sélection
+                if chart_theme == "Moderne":
+                    color_palette = ["#667eea", "#764ba2", "#f093fb", "#f5576c"]
+                elif chart_theme == "Sombre":
+                    color_palette = ["#1e3c72", "#2a5298", "#833ab4", "#fd1d1d"]
+                else:
+                    color_palette = px.colors.qualitative.Set2
+
+                if view_type == "Solde Global":
+                    # Graphique d'évolution amélioré
+                    fig_balance = px.area(
+                        balance_evolution,
+                        x="date",
+                        y="total_euros",
+                        title=f"💰 Évolution du patrimoine - {period_days} derniers jours",
+                        labels={"total_euros": "Solde (€)", "date": "Date"},
+                        color_discrete_sequence=color_palette
+                    )
+                    
+                    # Ajouter une ligne de tendance si demandé
+                    if smoothing == "Moyenne Mobile 7j" and len(balance_evolution) >= 7:
+                        balance_evolution["ma_7"] = balance_evolution["total_euros"].rolling(7, min_periods=1).mean()
+                        fig_balance.add_scatter(
+                            x=balance_evolution["date"], 
+                            y=balance_evolution["ma_7"],
+                            mode='lines',
+                            name='Tendance 7j',
+                            line=dict(color='red', width=2, dash='dash')
+                        )
+                    
+                    fig_balance.update_layout(
+                        xaxis_title="📅 Date", 
+                        yaxis_title="💰 Solde (€)", 
+                        hovermode="x unified",
+                        showlegend=True,
+                        height=500
+                    )
+                    st.plotly_chart(fig_balance, width="stretch")
+                    
+                elif view_type == "Linked vs Unlinked":
+                    # Évolution comparative linked vs unlinked
+                    linked_evolution = get_balance_evolution(st.session_state.ledger, linked_accounts, period_days)
+                    unlinked_evolution = get_balance_evolution(st.session_state.ledger, unlinked_accounts, period_days)
+                    
+                    fig_comp = go.Figure()
+                    
+                    fig_comp.add_trace(go.Scatter(
+                        x=linked_evolution["date"],
+                        y=linked_evolution["total_euros"],
+                        mode='lines+markers',
+                        name='🔗 Comptes Linked',
+                        line=dict(color=color_palette[0], width=3),
+                        fill='tonexty'
+                    ))
+                    
+                    fig_comp.add_trace(go.Scatter(
+                        x=unlinked_evolution["date"],
+                        y=unlinked_evolution["total_euros"],
+                        mode='lines+markers',
+                        name='📎 Comptes Unlinked',
+                        line=dict(color=color_palette[1], width=3),
+                        fill='tozeroy'
+                    ))
+                    
+                    fig_comp.update_layout(
+                        title="🏦 Évolution Comparative: Linked vs Unlinked",
+                        xaxis_title="📅 Date",
+                        yaxis_title="💰 Solde (€)",
+                        hovermode="x unified",
+                        height=500
+                    )
+                    st.plotly_chart(fig_comp, width="stretch")
+                    
+                elif view_type == "Flux Quotidiens":
+                    # Analyse des flux quotidiens
+                    flows_df = get_daily_flow_analysis(st.session_state.ledger, period_days)
+                    if not flows_df.empty:
+                        fig_flows = go.Figure()
+                        
+                        fig_flows.add_trace(go.Bar(
+                            x=flows_df["date"],
+                            y=flows_df["recettes"],
+                            name="💹 Recettes",
+                            marker_color=color_palette[0],
+                            opacity=0.8
+                        ))
+                        
+                        fig_flows.add_trace(go.Bar(
+                            x=flows_df["date"],
+                            y=-flows_df["depenses"],
+                            name="💸 Dépenses",
+                            marker_color=color_palette[1],
+                            opacity=0.8
+                        ))
+                        
+                        fig_flows.add_trace(go.Scatter(
+                            x=flows_df["date"],
+                            y=flows_df["net"],
+                            mode='lines+markers',
+                            name="📊 Flux Net",
+                            line=dict(color='orange', width=3)
+                        ))
+                        
+                        fig_flows.update_layout(
+                            title="📊 Analyse des Flux Quotidiens",
+                            xaxis_title="📅 Date",
+                            yaxis_title="💰 Montant (€)",
+                            barmode='relative',
+                            hovermode="x unified",
+                            height=500
+                        )
+                        st.plotly_chart(fig_flows, width="stretch")
 
                 # Ajout d'une ligne de tendance
                 if len(balance_evolution) > 1:
@@ -2109,7 +2320,7 @@ elif page == "📊 Dashboard":
         with tab4:
             st.subheader("🔮 Prédictions et Analyse des Flux")
 
-            if enable_predictions:
+            if show_predictions:
                 # Analyse des flux récents
                 flows_df = get_daily_flow_analysis(st.session_state.ledger, period_days)
 
@@ -2247,3 +2458,177 @@ elif page == "📊 Dashboard":
                 st.info(
                     "Activez les prédictions dans la sidebar pour voir cette section"
                 )
+
+        with tab5:
+            st.markdown("#### 🎯 Insights & Recommandations")
+            
+            # Analyse intelligente basée sur les données
+            col_insights, col_reco = st.columns([1, 1])
+            
+            with col_insights:
+                st.markdown("##### 🔍 Analyse Automatique")
+                
+                # Calculs pour les insights
+                linked_total = sum(balances_by_type["linked"].values()) / 100
+                unlinked_total = sum(balances_by_type["unlinked"].values()) / 100
+                total_net_worth = linked_total + unlinked_total
+                
+                # Ratios d'analyse
+                if total_net_worth > 0:
+                    linked_ratio = (linked_total / total_net_worth) * 100
+                    unlinked_ratio = (unlinked_total / total_net_worth) * 100
+                    
+                    # Insights automatiques
+                    insights = []
+                    
+                    if linked_ratio > 80:
+                        insights.append("⚠️ **Liquidité élevée**: Plus de 80% de vos fonds sont en comptes linked (opérationnels)")
+                    elif linked_ratio < 20:
+                        insights.append("💰 **Épargne importante**: Plus de 80% de vos fonds sont en comptes unlinked")
+                    
+                    if kpis.get('tendance_7j', 0) > 0:
+                        insights.append(f"📈 **Tendance positive**: +{kpis.get('tendance_7j', 0):.2f}€ sur 7 jours")
+                    elif kpis.get('tendance_7j', 0) < -50:
+                        insights.append(f"📉 **Attention**: Tendance négative de {kpis.get('tendance_7j', 0):.2f}€ sur 7j")
+                    
+                    avg_expense = kpis.get('depense_moy_jour', 0)
+                    if avg_expense > 0 and linked_total > 0:
+                        autonomy_days = linked_total / avg_expense
+                        if autonomy_days < 30:
+                            insights.append(f"🚨 **Autonomie limitée**: Seulement {autonomy_days:.0f} jours d'autonomie")
+                        elif autonomy_days > 365:
+                            insights.append(f"✅ **Excellente autonomie**: Plus d'1 an d'autonomie financière")
+                    
+                    # Analyse de la volatilité
+                    volatility = abs(kpis.get('tendance_7j', 0)) / 7
+                    if volatility > 20:
+                        insights.append("📊 **Volatilité élevée**: Variations importantes dans vos finances")
+                    elif volatility < 5:
+                        insights.append("📊 **Finances stables**: Faible volatilité détectée")
+                    
+                    for insight in insights:
+                        st.markdown(f"- {insight}")
+                        
+                    if not insights:
+                        st.info("💡 Pas d'insights particuliers détectés. Continuez à alimenter vos données!")
+                
+                # Statistiques avancées
+                st.markdown("##### 📊 Statistiques Avancées")
+                
+                stats_data = {
+                    "Métrique": [
+                        "Ratio Linked/Total",
+                        "Autonomie Financière", 
+                        "Croissance Mensuelle",
+                        "Score de Diversification"
+                    ],
+                    "Valeur": [
+                        f"{linked_ratio:.1f}%",
+                        f"{linked_total/avg_expense:.0f} jours" if avg_expense > 0 else "∞",
+                        f"{kpis.get('tendance_7j', 0)*4.3:+.0f} €/mois",
+                        f"{min(len([acc for acc in st.session_state.accounts if not acc.get('is_unlinked', False)]), 5)}/5"
+                    ]
+                }
+                
+                st.dataframe(pd.DataFrame(stats_data), width='stretch', hide_index=True)
+            
+            with col_reco:
+                st.markdown("##### 💡 Recommandations Personnalisées")
+                
+                recommendations = []
+                
+                # Recommandations basées sur les ratios
+                if linked_ratio > 85:
+                    recommendations.append({
+                        "type": "💰 Épargne",
+                        "titre": "Diversifier votre épargne",
+                        "description": "Considérez créer des comptes unlinked pour séparer épargne et liquidités",
+                        "priorité": "Moyenne"
+                    })
+                
+                if unlinked_total < 1000 and linked_total > 2000:
+                    recommendations.append({
+                        "type": "🎯 Planification",
+                        "titre": "Constituer une épargne de précaution",
+                        "description": "Transférez une partie vers des comptes unlinked pour l'épargne",
+                        "priorité": "Haute"
+                    })
+                
+                if avg_expense > 0 and linked_total / avg_expense < 60:
+                    recommendations.append({
+                        "type": "🚨 Urgent",
+                        "titre": "Renforcer la trésorerie",
+                        "description": "Moins de 2 mois d'autonomie. Augmentez vos comptes linked",
+                        "priorité": "Critique"
+                    })
+                
+                if kpis.get('tendance_7j', 0) < -100:
+                    recommendations.append({
+                        "type": "📉 Contrôle",
+                        "titre": "Analyser les dépenses",
+                        "description": "Tendance négative importante. Révisez votre budget",
+                        "priorité": "Haute"
+                    })
+                
+                if len(st.session_state.accounts) < 3:
+                    recommendations.append({
+                        "type": "🏦 Organisation",
+                        "titre": "Diversifier vos comptes",
+                        "description": "Créez des comptes spécialisés (épargne, projets, etc.)",
+                        "priorité": "Basse"
+                    })
+                
+                # Affichage des recommandations
+                for i, reco in enumerate(recommendations):
+                    priority_color = {
+                        "Critique": "#ff4444",
+                        "Haute": "#ff8800", 
+                        "Moyenne": "#ffbb00",
+                        "Basse": "#00bb00"
+                    }.get(reco["priorité"], "#666666")
+                    
+                    st.markdown(f"""
+                        <div style="border-left: 4px solid {priority_color}; 
+                                   padding: 1rem; margin: 1rem 0; 
+                                   background: #f8f9fa; border-radius: 0 8px 8px 0;">
+                            <h4 style="margin: 0; color: {priority_color};">{reco['type']}</h4>
+                            <h5 style="margin: 0.5rem 0;">{reco['titre']}</h5>
+                            <p style="margin: 0; color: #666;">{reco['description']}</p>
+                            <small style="color: {priority_color};">Priorité: {reco['priorité']}</small>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                if not recommendations:
+                    st.success("✅ Vos finances semblent bien organisées ! Aucune recommandation urgente.")
+            
+            # Section objectifs et planification
+            st.markdown("---")
+            st.markdown("##### 🎯 Planification d'Objectifs")
+            
+            col_obj1, col_obj2 = st.columns(2)
+            
+            with col_obj1:
+                st.markdown("**💰 Simulateur d'Épargne**")
+                target_amount = st.number_input("Objectif d'épargne (€)", min_value=0.0, value=5000.0, step=100.0)
+                monthly_savings = st.number_input("Épargne mensuelle (€)", min_value=0.0, value=200.0, step=10.0)
+                
+                if monthly_savings > 0:
+                    months_needed = target_amount / monthly_savings
+                    st.info(f"⏱️ Temps nécessaire: **{months_needed:.1f} mois** ({months_needed/12:.1f} ans)")
+                    
+            with col_obj2:
+                st.markdown("**📊 Projection Patrimoine**")
+                if kpis.get('tendance_7j', 0) != 0:
+                    monthly_trend = kpis.get('tendance_7j', 0) * 4.3  # 7j * 4.3 ≈ 30j
+                    current_net_worth = total_net_worth
+                    
+                    projections = []
+                    for months in [3, 6, 12]:
+                        future_value = current_net_worth + (monthly_trend * months)
+                        projections.append(f"**{months}M**: {future_value:,.0f}€")
+                    
+                    st.write("Projections basées sur la tendance:")
+                    for proj in projections:
+                        st.write(f"- {proj}")
+                else:
+                    st.info("Pas assez de données pour les projections")
