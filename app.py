@@ -1855,8 +1855,15 @@ elif page == "💰 Ledger":
                     st.caption(f"💬 {note}")
 
             with col_amount:
-                color_class = "green" if amt >= 0 else "red"
-                st.markdown(f":{color_class}[**{amt:+.2f} €**]")
+                # Afficher les dépenses en négatif, dépôts en positif
+                signed_amt = amt
+                if t == "expense":
+                    signed_amt = -abs(amt)
+                elif t == "deposit":
+                    signed_amt = abs(amt)
+                # transfer et adjustment: garder le signe naturel
+                color_class = "green" if signed_amt >= 0 else "red"
+                st.markdown(f":{color_class}[**{signed_amt:+.2f} €**]")
 
             st.markdown("---")
 
