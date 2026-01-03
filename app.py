@@ -1490,6 +1490,67 @@ elif page == "💰 Ledger":
                     st.success("Opération ajoutée")
                     st.rerun()
 
+        # Section Projection Fin de Mois
+        st.markdown("---")
+        st.markdown(
+            """
+            <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+                       padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
+                <h4 style="color: white; margin: 0; text-align: center;">
+                    📉 Projection Fin de Mois
+                </h4>
+            </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+        proj_acc_name = st.selectbox("Compte à projeter", acc_names, key="proj_acc")
+        daily_spend = st.number_input(
+            "Dépense journalière prévue (€)",
+            min_value=0.0,
+            step=10.0,
+            format="%.2f",
+            key="proj_spend",
+        )
+
+        if proj_acc_name:
+            proj_acc_id = acc_map_name_to_id[proj_acc_name]
+            # Recalculer les soldes actuels pour être sûr
+            current_balances = compute_balances()
+            current_balance_cents = current_balances.get(proj_acc_id, 0)
+            current_balance_eur = current_balance_cents / 100.0
+
+            # Calcul des jours restants
+            now = datetime.now(timezone.utc)
+            # Dernier jour du mois courant
+            # Astuce: prendre le 1er du mois suivant et retirer 1 jour
+            if now.month == 12:
+                next_month_first = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+            else:
+                next_month_first = datetime(
+                    now.year, now.month + 1, 1, tzinfo=timezone.utc
+                )
+
+            remaining_days = (
+                next_month_first.date() - now.date()
+            ).days - 1  # -1 car on compte les jours restants APRES aujourd'hui ou incluant aujourd'hui ? "jusqu'à la fin du mois". Usually includes today if not passed. Let's say remaining days including today.
+            # Actually, let's count days remaining including today.
+            # If today is 30th and month ends 30th, remaining is 1 (today).
+            # (next_month_first.date() - now.date()).days gives difference.
+            # Ex: Now Jan 30. Next Feb 1. Diff = 2. Days: 30, 31. So 2 days. Correct.
+            remaining_days = (next_month_first.date() - now.date()).days
+
+            projected_spend = daily_spend * remaining_days
+            projected_balance = current_balance_eur - projected_spend
+
+            st.caption(f"Jours restants (incl. auj.): {remaining_days}")
+            st.metric(
+                "Solde projeté fin de mois",
+                f"{projected_balance:.2f} €",
+                delta=f"-{projected_spend:.2f} €",
+                delta_color="inverse",
+            )
+
         if st.session_state.rules:
             st.markdown("---")
             st.markdown(
