@@ -1603,12 +1603,14 @@ elif page == "💰 Ledger":
                                 else int(rule.get("default_amount_cents", 0))
                             )
                         actions = rule.get("actions", [])
-                        # 1) Appliquer les montants fixes en premier (somme des fixes)
+                        # 1) Appliquer les montants fixes en premier (somme des fixes, toujours positives)
                         fixed_total = sum(
                             max(0, int(a.get("fixed_cents", 0))) for a in actions
                         )
-                        # 2) Calculer la base restante pour les pourcentages
-                        remaining_base = max(base_value_cents - fixed_total, 0)
+                        # 2) Calculer la base restante pour les pourcentages sur la magnitude de la différence
+                        base_is_negative = base_value_cents < 0
+                        base_magnitude = abs(base_value_cents)
+                        remaining_base = max(base_magnitude - fixed_total, 0)
 
                         # Appliquer les actions
                         ts = now_iso_utc()
@@ -1618,16 +1620,26 @@ elif page == "💰 Ledger":
                             )  # deposit/expense/transfer/adjustment
                             percent = float(act.get("percent", 0.0))
                             fixed = int(act.get("fixed_cents", 0))
-                            # Variable sur la base restante
+                            # Part variable calculée sur la base restante (positive)
                             variable_part = (
                                 int(math.floor(remaining_base * percent))
                                 if percent > 0
                                 else 0
                             )
-                            amount = max(0, fixed) + max(0, variable_part)
+                            amount = max(0, fixed) + variable_part
                             note = f"Rule:{rule['name']}"
                             entry = None
-                            if kind == "deposit":
+
+                            # Adapter le type si la différence est négative (on retire du solde linked)
+                            kind_effective = kind
+                            if base_is_negative:
+                                if kind == "deposit":
+                                    kind_effective = "expense"
+                                elif kind == "adjustment":
+                                    kind_effective = "expense"
+                                # expense et transfer inchangés
+
+                            if kind_effective == "deposit":
                                 entry = {
                                     "ts": ts,
                                     "type": "deposit",
@@ -1635,21 +1647,25 @@ elif page == "💰 Ledger":
                                     "dest_account_id": act.get("dest_account_id"),
                                     "note": note,
                                 }
-                            elif kind == "expense":
-                                entry = {
-                                    "ts": ts,
-                                    "type": "expense",
-                                    "amount_cents": amount,
-                                    "src_account_id": act.get("src_account_id"),
-                                    "note": note,
-                                }
-                            elif kind == "transfer":
+                            elif kind_effective == "expense":
+                                # Déterminer la source
+                                src_for_expense = act.get("src_account_id")
+                                if kind == "adjustment" and not src_for_expense:
+                                    src_for_expense = act.get("account_id")
+                                if kind == "deposit" and not src_for_expense:
+                                    src_for_expense = act.get("dest_account_id")
+                                if src_for_expense:
+                                    entry = {
+                                        "ts": ts,
+                                        "type": "expense",
+                                        "amount_cents": amount,
+                                        "src_account_id": src_for_expense,
+                                        "note": note,
+                                    }
+                            elif kind_effective == "transfer":
                                 src_a = act.get("src_account_id")
                                 dest_a = act.get("dest_account_id")
-                                if src_a == dest_a:
-                                    # ignorer transferts invalides (src == dest)
-                                    entry = None
-                                else:
+                                if src_a and dest_a and src_a != dest_a:
                                     entry = {
                                         "ts": ts,
                                         "type": "transfer",
@@ -1658,7 +1674,7 @@ elif page == "💰 Ledger":
                                         "dest_account_id": dest_a,
                                         "note": note,
                                     }
-                            elif kind == "adjustment":
+                            elif kind_effective == "adjustment":
                                 entry = {
                                     "ts": ts,
                                     "type": "adjustment",
