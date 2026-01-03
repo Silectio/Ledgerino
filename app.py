@@ -20,6 +20,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+print("🚀 Application démarrée version : 0.1")
+
 
 # Utilitaires
 def now_iso_utc() -> str:
