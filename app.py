@@ -1612,6 +1612,81 @@ elif page == "💰 Ledger":
                         base_magnitude = abs(base_value_cents)
                         remaining_base = max(base_magnitude - fixed_total, 0)
 
+                        # Préparer les actions effectives et détecter si aucune répartition n'est configurée (fixe=0 et % = 0)
+                        effective_actions = []
+                        all_zero = True
+                        for act in actions:
+                            kind_tmp = act.get("kind")
+                            kind_eff_tmp = kind_tmp
+                            if base_is_negative:
+                                if kind_tmp == "deposit":
+                                    kind_eff_tmp = "expense"
+                                elif kind_tmp == "adjustment":
+                                    kind_eff_tmp = "expense"
+                            pct_tmp = float(act.get("percent", 0.0))
+                            fix_tmp = int(act.get("fixed_cents", 0))
+                            if pct_tmp > 0 or fix_tmp > 0:
+                                all_zero = False
+                            effective_actions.append(
+                                {
+                                    "act": act,
+                                    "kind_effective": kind_eff_tmp,
+                                    "percent": pct_tmp,
+                                    "fixed": max(0, fix_tmp),
+                                }
+                            )
+
+                        eligible_kinds = (
+                            ["expense"] if base_is_negative else ["deposit", "expense"]
+                        )
+                        eligible_effective_actions = [
+                            ea
+                            for ea in effective_actions
+                            if ea["kind_effective"] in eligible_kinds
+                        ]
+                        use_equal_split = (
+                            all_zero
+                            and remaining_base > 0
+                            and len(eligible_effective_actions) > 0
+                        )
+
+                        equal_shares = {}
+                        if use_equal_split:
+                            count = len(eligible_effective_actions)
+                            share, rem = divmod(remaining_base, count)
+                            for i, ea in enumerate(eligible_effective_actions):
+                                equal_shares[id(ea["act"])] = share + (
+                                    1 if i < rem else 0
+                                )
+                            st.info(
+                                f"Répartition automatique: {remaining_base/100:.2f}€ répartis équitablement sur {count} action(s)"
+                            )
+
+                        # Normaliser la répartition des pourcentages si applicable (hors split égalitaire)
+                        variable_shares = {}
+                        if not use_equal_split:
+                            percent_sum = sum(
+                                ea["percent"]
+                                for ea in eligible_effective_actions
+                                if ea["percent"] > 0
+                            )
+                            if percent_sum > 0 and remaining_base > 0:
+                                allocated = 0
+                                for i, ea in enumerate(eligible_effective_actions):
+                                    pct = ea["percent"]
+                                    if pct <= 0:
+                                        continue
+                                    if i == len(eligible_effective_actions) - 1:
+                                        share = remaining_base - allocated
+                                    else:
+                                        share = int(
+                                            math.floor(
+                                                remaining_base * pct / percent_sum
+                                            )
+                                        )
+                                    allocated += max(0, share)
+                                    variable_shares[id(ea["act"])] = max(0, share)
+
                         # Appliquer les actions
                         ts = now_iso_utc()
                         for act in actions:
@@ -1620,13 +1695,18 @@ elif page == "💰 Ledger":
                             )  # deposit/expense/transfer/adjustment
                             percent = float(act.get("percent", 0.0))
                             fixed = int(act.get("fixed_cents", 0))
-                            # Part variable calculée sur la base restante (positive)
-                            variable_part = (
-                                int(math.floor(remaining_base * percent))
-                                if percent > 0
-                                else 0
-                            )
-                            amount = max(0, fixed) + variable_part
+                            if use_equal_split:
+                                amount = equal_shares.get(id(act), 0)
+                            else:
+                                # Utiliser parts variables normalisées si présentes
+                                variable_part = variable_shares.get(id(act))
+                                if variable_part is None:
+                                    variable_part = (
+                                        int(math.floor(remaining_base * percent))
+                                        if percent > 0
+                                        else 0
+                                    )
+                                amount = max(0, fixed) + max(0, variable_part)
                             note = f"Rule:{rule['name']}"
                             entry = None
 
